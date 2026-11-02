@@ -22,6 +22,21 @@ class ClientApiTests(TestCase):
 
         self.assertIn(response.status_code, (401, 403))
 
+    def test_staff_without_client_role_cannot_read_or_modify_clients(self):
+        user = get_user_model().objects.create_user(
+            username="staff-without-client-role",
+            password="MotDePasseTest-2026",
+            is_staff=True,
+        )
+        client = APIClient()
+        client.force_authenticate(user)
+
+        self.assertEqual(client.get("/api/clients/").status_code, 403)
+        self.assertEqual(
+            client.post("/api/clients/", {"nom": "Non autorisé"}).status_code,
+            403,
+        )
+
     def test_vendor_can_create_and_deactivate_client(self):
         response = self.client.post(
             "/api/clients/",

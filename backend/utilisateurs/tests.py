@@ -70,11 +70,13 @@ from rest_framework.test import APIClient
 class UserApiTests(TestCase):
         def setUp(self):
                 user_model = get_user_model()
+                self.admin_group, _ = Group.objects.get_or_create(name="Administrateur")
                 self.admin = user_model.objects.create_user(
                         username="admin-api",
                         password="MotDePasseTest-2026",
                         is_staff=True,
                 )
+                self.admin.groups.add(self.admin_group)
                 self.regular_user = user_model.objects.create_user(
                         username="vendeur-api",
                         password="MotDePasseTest-2026",
@@ -83,6 +85,18 @@ class UserApiTests(TestCase):
 
         def test_user_api_is_admin_only(self):
                 self.client.force_authenticate(self.regular_user)
+
+                response = self.client.get("/api/utilisateurs/")
+
+                self.assertEqual(response.status_code, 403)
+
+        def test_is_staff_without_administrator_role_does_not_grant_user_api_access(self):
+                staff_user = get_user_model().objects.create_user(
+                        username="staff-without-role",
+                        password="MotDePasseTest-2026",
+                        is_staff=True,
+                )
+                self.client.force_authenticate(staff_user)
 
                 response = self.client.get("/api/utilisateurs/")
 
@@ -124,6 +138,64 @@ class UserApiTests(TestCase):
                 self.assertTrue(created_user.check_password("BonMotDePasse-2026!"))
                 self.assertEqual(list(created_user.groups.values_list("name", flat=True)), ["Vendeur"])
 
+        def test_administrator_can_reset_another_users_password(self):
+                self.client.force_authenticate(self.admin)
+
+                response = self.client.post(
+                        f"/api/utilisateurs/{self.regular_user.pk}/reinitialiser-mot-de-passe/",
+                        {"new_password": "NouveauMotDePasse-2026!"},
+                        format="json",
+                )
+
+                self.assertEqual(response.status_code, 200, response.data)
+                self.regular_user.refresh_from_db()
+                self.assertTrue(self.regular_user.check_password("NouveauMotDePasse-2026!"))
+                self.assertNotIn("password", response.data)
+
+        def test_non_administrator_cannot_reset_password(self):
+                self.client.force_authenticate(self.regular_user)
+
+                response = self.client.post(
+                        f"/api/utilisateurs/{self.admin.pk}/reinitialiser-mot-de-passe/",
+                        {"new_password": "NouveauMotDePasse-2026!"},
+                        format="json",
+                )
+
+                self.assertEqual(response.status_code, 403)
+
+        def test_administrator_cannot_reset_own_password_from_admin_action(self):
+                self.client.force_authenticate(self.admin)
+
+                response = self.client.post(
+                        f"/api/utilisateurs/{self.admin.pk}/reinitialiser-mot-de-passe/",
+                        {"new_password": "NouveauMotDePasse-2026!"},
+                        format="json",
+                )
+
+                self.assertEqual(response.status_code, 400)
+
+        def test_administrator_reset_rejects_weak_password(self):
+                self.client.force_authenticate(self.admin)
+
+                response = self.client.post(
+                        f"/api/utilisateurs/{self.regular_user.pk}/reinitialiser-mot-de-passe/",
+                        {"new_password": "123"},
+                        format="json",
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.regular_user.refresh_from_db()
+                self.assertTrue(self.regular_user.check_password("MotDePasseTest-2026"))
+
+        def test_user_api_never_exposes_password_values(self):
+                self.client.force_authenticate(self.admin)
+
+                response = self.client.get("/api/utilisateurs/")
+
+                self.assertEqual(response.status_code, 200)
+                self.assertNotIn("password", response.data[0])
+                self.assertNotIn("mot_de_passe", response.data[0])
+
         def test_admin_cannot_create_user_with_weak_password(self):
                 self.client.force_authenticate(self.admin)
 
@@ -142,13 +214,16 @@ class UserApiTests(TestCase):
                 )
 
         def test_admin_can_list_existing_roles(self):
-                Group.objects.create(name="Gestionnaire de stock")
+                Group.objects.get_or_create(name="Gestionnaire de stock")
                 self.client.force_authenticate(self.admin)
 
                 response = self.client.get("/api/roles/")
 
                 self.assertEqual(response.status_code, 200)
-                self.assertEqual(response.data[0]["name"], "Gestionnaire de stock")
+                self.assertIn(
+                        "Gestionnaire de stock",
+                        [role["name"] for role in response.data],
+                )
 
         def test_admin_can_inspect_effective_api_and_django_permissions(self):
                 Group.objects.get_or_create(name="Administrateur")
@@ -156,6 +231,7 @@ class UserApiTests(TestCase):
                 Group.objects.get_or_create(name="Gestionnaire de stock")
                 Group.objects.get_or_create(name="Responsable magasin")
                 Group.objects.get_or_create(name="Vendeur")
+                Group.objects.get_or_create(name="Role externe")
                 self.client.force_authenticate(self.admin)
 
                 response = self.client.get("/api/roles/effectifs/")
@@ -167,6 +243,7 @@ class UserApiTests(TestCase):
                 self.assertEqual(roles["Vendeur"]["permissions_api"]["caisse"], "absent")
                 self.assertEqual(roles["Gestionnaire de stock"]["permissions_api"]["stock"], "gestion")
                 self.assertIn("permissions_django", roles["Vendeur"])
+                self.assertEqual(roles["Role externe"]["permissions_api"]["stock"], "aucun")
 
         def test_non_admin_cannot_inspect_role_permissions(self):
                 self.client.force_authenticate(self.regular_user)
@@ -176,8 +253,7 @@ class UserApiTests(TestCase):
                 self.assertEqual(response.status_code, 403)
 
         def test_administrator_group_can_access_user_api(self):
-                group = Group.objects.create(name="Administrateur")
-                self.regular_user.groups.add(group)
+                self.regular_user.groups.add(self.admin_group)
                 self.client.force_authenticate(self.regular_user)
 
                 response = self.client.get("/api/utilisateurs/")
@@ -200,8 +276,7 @@ class UserApiTests(TestCase):
         def test_last_group_administrator_cannot_remove_own_role(self):
                 self.admin.is_active = False
                 self.admin.save(update_fields=["is_active"])
-                admin_group = Group.objects.create(name="Administrateur")
-                self.regular_user.groups.add(admin_group)
+                self.regular_user.groups.add(self.admin_group)
                 self.client.force_authenticate(self.regular_user)
 
                 response = self.client.patch(

@@ -1,11 +1,21 @@
 ﻿import json
 
-from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth import (
+    authenticate,
+    login,
+    logout,
+    update_session_auth_hash,
+)
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import JsonResponse
 from django.middleware.csrf import get_token
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
-
+from rest_framework import serializers, status
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
 def donnees_utilisateur(user):
     return {
@@ -83,3 +93,40 @@ def session_utilisateur(request):
 def deconnexion(request):
     logout(request)
     return JsonResponse({"detail": "Déconnexion réussie."})
+
+
+class ChangeOwnPasswordSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True, allow_blank=False)
+    new_password = serializers.CharField(write_only=True, allow_blank=False)
+
+    def validate(self, attrs):
+        user = self.context["request"].user
+        if not user.check_password(attrs["current_password"]):
+            raise serializers.ValidationError({
+                "current_password": "Le mot de passe actuel est incorrect."
+            })
+        try:
+            validate_password(attrs["new_password"], user)
+        except DjangoValidationError as error:
+            raise serializers.ValidationError({
+                "new_password": error.messages
+            }) from error
+        return attrs
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def changer_mot_de_passe(request):
+    serializer = ChangeOwnPasswordSerializer(
+        data=request.data,
+        context={"request": request},
+    )
+    serializer.is_valid(raise_exception=True)
+    user = request.user
+    user.set_password(serializer.validated_data["new_password"])
+    user.save(update_fields=["password"])
+    update_session_auth_hash(request, user)
+    return Response(
+        {"detail": "Le mot de passe a été modifié."},
+        status=status.HTTP_200_OK,
+    )

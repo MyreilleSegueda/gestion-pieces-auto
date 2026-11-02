@@ -6,13 +6,15 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connection
+from django.db.models import Sum
 from django.test import TestCase, TransactionTestCase
 from rest_framework.test import APIClient
 
 from inventory.models import Categorie, MouvementStock, PieceDetachee
 from invoicing.models import Facture
+from caisse.models import Encaissement, Remboursement
 
-from .models import LigneVente, Vente
+from .models import LigneRetourVente, LigneVente, RetourVente, Vente
 
 
 class VenteApiTests(TestCase):
@@ -48,6 +50,25 @@ class VenteApiTests(TestCase):
         response = APIClient().get("/api/ventes/")
 
         self.assertIn(response.status_code, (401, 403))
+
+    def test_staff_without_sales_role_cannot_read_or_create_sales(self):
+        staff_user = get_user_model().objects.create_user(
+            username="staff-without-sales-role",
+            password="MotDePasseTest-2026",
+            is_staff=True,
+        )
+        client = APIClient()
+        client.force_authenticate(staff_user)
+
+        self.assertEqual(client.get("/api/ventes/").status_code, 403)
+        self.assertEqual(
+            client.post(
+                "/api/ventes/",
+                {"lignes": [{"piece": self.piece.pk, "quantite": 1}]},
+                format="json",
+            ).status_code,
+            403,
+        )
 
     def test_sale_draft_snapshots_price_without_changing_stock(self):
         response = self.create_sale()
@@ -161,6 +182,188 @@ class VenteApiTests(TestCase):
         self.assertEqual(Vente.objects.get(pk=sale_id).statut, "VALIDEE")
         self.assertEqual(LigneVente.objects.get(vente_id=sale_id).quantite, 2)
         self.assertEqual(MouvementStock.objects.filter(type_mouvement="SORTIE").count(), 1)
+
+    def create_administrator(self):
+        admin = get_user_model().objects.create_user(
+            username="return-admin",
+            password="test-password",
+        )
+        admin.groups.add(Group.objects.create(name="Administrateur"))
+        return admin
+
+    def validated_sale(self, quantity=2):
+        created = self.create_sale(quantity)
+        self.assertEqual(created.status_code, 201)
+        response = self.client.post(f"/api/ventes/{created.data['id']}/valider/")
+        self.assertEqual(response.status_code, 200)
+        return created.data["id"], created.data["lignes"][0]
+
+    def test_partial_return_requires_admin_authorization_and_restock_is_once(self):
+        sale_id, line = self.validated_sale(quantity=2)
+        self.piece.refresh_from_db()
+        initial_stock = self.piece.quantite_stock
+        key = "c789ec26-4d33-4aeb-9874-df412d697f47"
+        requested = self.client.post(
+            "/api/retours-ventes/",
+            {
+                "vente": sale_id,
+                "type_operation": RetourVente.RETOUR,
+                "motif": "Pièce non adaptée",
+                "lignes": [{"ligne_vente": line["id"], "quantite": 1}],
+            },
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=key,
+        )
+        self.assertEqual(requested.status_code, 201, requested.data)
+        self.assertEqual(requested.data["montant_total"], "900.00")
+        self.piece.refresh_from_db()
+        self.assertEqual(self.piece.quantite_stock, initial_stock)
+
+        forbidden = self.client.post(
+            f"/api/retours-ventes/{requested.data['id']}/autoriser/",
+            {"remise_en_stock": True},
+            format="json",
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
+        self.client.force_authenticate(self.create_administrator())
+        approved = self.client.post(
+            f"/api/retours-ventes/{requested.data['id']}/autoriser/",
+            {"remise_en_stock": True},
+            format="json",
+        )
+        repeated = self.client.post(
+            f"/api/retours-ventes/{requested.data['id']}/autoriser/",
+            {"remise_en_stock": True},
+            format="json",
+        )
+        self.assertEqual(approved.status_code, 200, approved.data)
+        self.assertEqual(repeated.status_code, 200)
+        self.piece.refresh_from_db()
+        self.assertEqual(self.piece.quantite_stock, initial_stock + 1)
+        self.assertEqual(
+            MouvementStock.objects.filter(
+                type_mouvement="RETOUR",
+                reference_document=requested.data["reference"],
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            LigneRetourVente.objects.filter(retour_id=requested.data["id"]).aggregate(
+                total=Sum("quantite")
+            )["total"],
+            1,
+        )
+
+        duplicate_return = self.client.post(
+            "/api/retours-ventes/",
+            {
+                "vente": sale_id,
+                "type_operation": RetourVente.RETOUR,
+                "motif": "Trop de pièces",
+                "lignes": [{"ligne_vente": line["id"], "quantite": 2}],
+            },
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="c12c6fb9-5e53-4f98-b186-22676a9e33af",
+        )
+        self.assertEqual(duplicate_return.status_code, 400)
+
+        invoice = self.client.get("/api/factures/").data[0]
+        self.assertEqual(invoice["montant_avoirs"], "900.00")
+        self.assertEqual(invoice["solde_restant"], "900.00")
+        invoice_model = Facture.objects.get(vente_id=sale_id)
+        Encaissement.objects.create(
+            facture=invoice_model,
+            montant=Decimal("900.00"),
+            mode_paiement="ESPECES",
+            encaisse_par=self.user,
+        )
+        settled_invoice = self.client.get("/api/factures/").data[0]
+        self.assertEqual(settled_invoice["etat_paiement"], "Payée")
+        self.assertEqual(settled_invoice["solde_restant"], "0.00")
+
+    def test_sale_cancellation_is_admin_approved_traceable_and_financially_separate(self):
+        sale_id, _line = self.validated_sale(quantity=2)
+        invoice = Facture.objects.get(vente_id=sale_id)
+        payment = Encaissement.objects.create(
+            facture=invoice,
+            montant=Decimal("1000.00"),
+            mode_paiement="ESPECES",
+            encaisse_par=self.user,
+        )
+        self.piece.refresh_from_db()
+        before = self.piece.quantite_stock
+
+        requested = self.client.post(
+            f"/api/ventes/{sale_id}/demander-annulation/",
+            {"motif": "Commande annulée par le client"},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="e301fa6d-5eed-4623-a16e-3c3cf8fddc1f",
+        )
+        self.assertEqual(requested.status_code, 201, requested.data)
+        self.assertEqual(requested.data["type_operation"], RetourVente.ANNULATION)
+        self.assertEqual(requested.data["montant_total"], "1800.00")
+        self.assertEqual(Vente.objects.get(pk=sale_id).statut, "VALIDEE")
+
+        admin = self.create_administrator()
+        self.client.force_authenticate(admin)
+        approved = self.client.post(
+            f"/api/retours-ventes/{requested.data['id']}/autoriser/",
+            {"remise_en_stock": True},
+            format="json",
+        )
+        repeated = self.client.post(
+            f"/api/retours-ventes/{requested.data['id']}/autoriser/",
+            {"remise_en_stock": True},
+            format="json",
+        )
+        self.assertEqual(approved.status_code, 200, approved.data)
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(Vente.objects.get(pk=sale_id).statut, "ANNULEE")
+        self.piece.refresh_from_db()
+        self.assertEqual(self.piece.quantite_stock, before + 2)
+        self.assertTrue(Facture.objects.filter(pk=invoice.pk).exists())
+        self.assertEqual(Remboursement.objects.filter(
+            encaissement=payment,
+            retour_vente_id=requested.data["id"],
+            statut=Remboursement.EN_ATTENTE,
+        ).count(), 1)
+
+        invoice_data = self.client.get("/api/factures/").data[0]
+        self.assertEqual(invoice_data["etat_paiement"], "Annulée")
+        self.assertEqual(invoice_data["solde_restant"], "0.00")
+        self.assertEqual(Encaissement.objects.filter(pk=payment.pk).count(), 1)
+
+    def test_return_without_restock_is_credited_but_does_not_change_stock(self):
+        sale_id, line = self.validated_sale(quantity=2)
+        self.piece.refresh_from_db()
+        before = self.piece.quantite_stock
+        requested = self.client.post(
+            "/api/retours-ventes/",
+            {
+                "vente": sale_id,
+                "type_operation": RetourVente.RETOUR,
+                "motif": "Pièce endommagée",
+                "lignes": [{"ligne_vente": line["id"], "quantite": 1}],
+            },
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="8b3cf342-191f-47d7-af14-e4e0ea4af28b",
+        )
+        self.client.force_authenticate(self.create_administrator())
+        approved = self.client.post(
+            f"/api/retours-ventes/{requested.data['id']}/autoriser/",
+            {"remise_en_stock": False},
+            format="json",
+        )
+        self.assertEqual(approved.status_code, 200)
+        self.piece.refresh_from_db()
+        self.assertEqual(self.piece.quantite_stock, before)
+        invoice = self.client.get("/api/factures/").data[0]
+        self.assertEqual(invoice["montant_avoirs"], "900.00")
+        self.assertFalse(MouvementStock.objects.filter(
+            type_mouvement="RETOUR",
+            reference_document=requested.data["reference"],
+        ).exists())
 
 
 @skipUnless(connection.vendor == "postgresql", "Ce test exige PostgreSQL.")

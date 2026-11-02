@@ -35,6 +35,25 @@ class InventoryApiTests(TestCase):
 
 		self.assertIn(response.status_code, (401, 403))
 
+	def test_staff_without_business_role_cannot_read_or_change_stock(self):
+		staff_user = get_user_model().objects.create_user(
+			username="staff-without-stock-role",
+			password="MotDePasseTest-2026",
+			is_staff=True,
+		)
+		client = APIClient()
+		client.force_authenticate(staff_user)
+
+		read_response = client.get("/api/pieces/")
+		write_response = client.post(
+			"/api/pieces/",
+			{"reference": "DENIED", "designation": "Denied"},
+			format="json",
+		)
+
+		self.assertEqual(read_response.status_code, 403)
+		self.assertEqual(write_response.status_code, 403)
+
 	def test_login_session_with_stock_role_can_record_movement(self):
 		client = Client(enforce_csrf_checks=True)
 		csrf = client.get("/api/auth/csrf/")

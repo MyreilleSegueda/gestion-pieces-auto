@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
-from accounts.role_permissions import ADMINISTRATOR_ROLE
+from accounts.role_permissions import ADMINISTRATOR_ROLE, is_administrator
 from rest_framework import serializers
 
 User = get_user_model()
@@ -53,7 +53,7 @@ class UtilisateurSerializer(serializers.ModelSerializer):
         if self.instance is not None and self._is_administrator(self.instance):
             disabling = attrs.get("is_active") is False
             replacing_groups = "groups" in attrs
-            remains_administrator = self.instance.is_staff or (
+            remains_administrator = self.instance.is_superuser or (
                 replacing_groups
                 and any(group.name == ADMINISTRATOR_ROLE for group in attrs["groups"])
             )
@@ -84,13 +84,13 @@ class UtilisateurSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def _is_administrator(user):
-        return user.is_staff or user.groups.filter(name=ADMINISTRATOR_ROLE).exists()
+        return is_administrator(user)
 
     @staticmethod
     def _has_other_administrator(user):
         return (
             User.objects.filter(is_active=True)
-            .filter(Q(is_staff=True) | Q(groups__name=ADMINISTRATOR_ROLE))
+            .filter(Q(is_superuser=True) | Q(groups__name=ADMINISTRATOR_ROLE))
             .exclude(pk=user.pk)
             .distinct()
             .exists()
@@ -128,3 +128,15 @@ class RoleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Group
         fields = ["id", "name"]
+
+
+class NewPasswordSerializer(serializers.Serializer):
+    new_password = serializers.CharField(write_only=True, allow_blank=False)
+
+    def validate_new_password(self, value):
+        target_user = self.context.get("target_user")
+        try:
+            validate_password(value, target_user)
+        except DjangoValidationError as error:
+            raise serializers.ValidationError(error.messages) from error
+        return value

@@ -4,7 +4,7 @@ from rest_framework import serializers
 from clients.models import Client
 from inventory.models import PieceDetachee
 
-from .models import LigneVente, Vente
+from .models import LigneRetourVente, LigneVente, RetourVente, Vente
 
 
 class LigneVenteReadSerializer(serializers.ModelSerializer):
@@ -164,3 +164,83 @@ class VenteDraftUpdateSerializer(serializers.Serializer):
 
         instance.save()
         return instance
+
+
+class LigneRetourVenteReadSerializer(serializers.ModelSerializer):
+    total = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LigneRetourVente
+        fields = [
+            "id",
+            "ligne_vente",
+            "reference_piece",
+            "designation",
+            "quantite",
+            "prix_unitaire",
+            "total",
+        ]
+
+    def get_total(self, line):
+        return str(line.quantite * line.prix_unitaire)
+
+
+class RetourVenteSerializer(serializers.ModelSerializer):
+    lignes = LigneRetourVenteReadSerializer(many=True, read_only=True)
+    vente_reference = serializers.CharField(source="vente.reference", read_only=True)
+    montant_total = serializers.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        read_only=True,
+    )
+    demande_par_nom = serializers.SerializerMethodField()
+    autorise_par_nom = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RetourVente
+        fields = [
+            "id",
+            "reference",
+            "vente",
+            "vente_reference",
+            "type_operation",
+            "motif",
+            "statut",
+            "remise_en_stock",
+            "montant_total",
+            "lignes",
+            "demande_par",
+            "demande_par_nom",
+            "autorise_par",
+            "autorise_par_nom",
+            "date_demande",
+            "date_decision",
+        ]
+        read_only_fields = fields
+
+    def get_demande_par_nom(self, record):
+        user = record.demande_par
+        return "Utilisateur supprimé" if user is None else (
+            user.get_full_name() or user.username
+        )
+
+    def get_autorise_par_nom(self, record):
+        user = record.autorise_par
+        return None if user is None else (user.get_full_name() or user.username)
+
+
+class LigneRetourVenteCreateSerializer(serializers.Serializer):
+    ligne_vente = serializers.IntegerField(min_value=1)
+    quantite = serializers.IntegerField(min_value=1)
+
+
+class RetourVenteCreateSerializer(serializers.Serializer):
+    vente = serializers.PrimaryKeyRelatedField(queryset=Vente.objects.all())
+    type_operation = serializers.ChoiceField(choices=RetourVente.TYPES)
+    motif = serializers.CharField(max_length=1000, trim_whitespace=True)
+    lignes = LigneRetourVenteCreateSerializer(many=True, required=False)
+
+    def validate_motif(self, value):
+        if not value:
+            raise serializers.ValidationError("Le motif est obligatoire.")
+        return value

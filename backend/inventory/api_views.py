@@ -10,7 +10,7 @@ from rest_framework.permissions import BasePermission, SAFE_METHODS
 from rest_framework.response import Response
 from rest_framework import status
 
-from accounts.role_permissions import roles_with_write_access
+from accounts.role_permissions import has_module_access
 from .models import Categorie, PieceDetachee, MouvementStock
 from .serializers import (
     CategorieSerializer,
@@ -20,19 +20,9 @@ from .serializers import (
 
 
 class IsStockReaderOrManager(BasePermission):
-    roles_gestion_stock = roles_with_write_access("stock")
-
     def has_permission(self, request, view):
         user = request.user
-        if not user.is_authenticated:
-            return False
-
-        if request.method in SAFE_METHODS:
-            return True
-
-        return user.is_staff or user.groups.filter(
-            name__in=self.roles_gestion_stock
-        ).exists()
+        return has_module_access(user, "stock", write=request.method not in SAFE_METHODS)
 
 
 class CategorieViewSet(viewsets.ModelViewSet):

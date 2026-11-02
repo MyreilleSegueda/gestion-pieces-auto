@@ -58,6 +58,17 @@ class FactureApiTests(TestCase):
 
         self.assertIn(response.status_code, (401, 403))
 
+    def test_staff_without_invoice_role_cannot_read_invoices(self):
+        staff_user = get_user_model().objects.create_user(
+            username="staff-without-invoice-role",
+            password="MotDePasseTest-2026",
+            is_staff=True,
+        )
+        client = APIClient()
+        client.force_authenticate(staff_user)
+
+        self.assertEqual(client.get("/api/factures/").status_code, 403)
+
     def test_invoice_cannot_be_created_or_deleted_directly(self):
         sale = self.create_validated_sale()
         invoice = Facture.objects.get(vente=sale)

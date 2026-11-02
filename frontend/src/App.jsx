@@ -1,8 +1,30 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import './App.css'
 
 const API_URL = '/api/utilisateurs/'
+const BUSINESS_TIME_ZONE = 'Africa/Ouagadougou'
+
+function formatBusinessDateTime(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return new Intl.DateTimeFormat('fr-FR', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+    timeZone: BUSINESS_TIME_ZONE,
+  }).format(date)
+}
+
+function formatBusinessDate(value) {
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? `${value}T12:00:00Z`
+    : value
+  const date = new Date(normalized)
+  if (Number.isNaN(date.getTime())) return '—'
+  return new Intl.DateTimeFormat('fr-FR', {
+    dateStyle: 'short',
+    timeZone: BUSINESS_TIME_ZONE,
+  }).format(date)
+}
 
 const navigation = [
   { id: 'dashboard', icon: '▦', label: 'Tableau de bord' },
@@ -110,19 +132,53 @@ function App() {
   const [users, setUsers] = useState([])
   const [clients, setClients] = useState([])
   const [suppliers, setSuppliers] = useState([])
+  const [supplierPurchases, setSupplierPurchases] = useState([])
+  const [purchaseForm, setPurchaseForm] = useState({
+    fournisseur: '',
+    lignes: [{ piece: '', quantite: '1', prix_unitaire: '' }],
+  })
   const [sales, setSales] = useState([])
+  const [saleReturns, setSaleReturns] = useState([])
   const [editingSaleId, setEditingSaleId] = useState(null)
+  const [selectedReturnSale, setSelectedReturnSale] = useState(null)
+  const [returnReason, setReturnReason] = useState('')
+  const [returnQuantities, setReturnQuantities] = useState({})
+  const [selectedCancellationSale, setSelectedCancellationSale] = useState(null)
+  const [cancellationReason, setCancellationReason] = useState('')
   const [dashboardData, setDashboardData] = useState(null)
   const [reportStartDate, setReportStartDate] = useState('')
   const [reportEndDate, setReportEndDate] = useState('')
+  const [exportType, setExportType] = useState('indicateurs')
+  const [exportFormat, setExportFormat] = useState('xlsx')
+  const [exportPieceId, setExportPieceId] = useState('')
+  const [exportUserId, setExportUserId] = useState('')
+  const [exportMovementType, setExportMovementType] = useState('')
   const [invoices, setInvoices] = useState([])
   const [cashInvoices, setCashInvoices] = useState([])
   const [encaissements, setEncaissements] = useState([])
+  const [remboursements, setRemboursements] = useState([])
+  const [cloturesCaisse, setCloturesCaisse] = useState([])
+  const [cashPreview, setCashPreview] = useState(null)
   const [paymentForm, setPaymentForm] = useState({
     facture_id: '',
     montant: '',
     mode_paiement: 'ESPECES',
   })
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false)
+  const paymentRequestRef = useRef(null)
+  const [selectedReceipt, setSelectedReceipt] = useState(null)
+  const [selectedPaymentForRefund, setSelectedPaymentForRefund] = useState(null)
+  const [refundForm, setRefundForm] = useState({
+    montant: '',
+    motif: '',
+    mode_remboursement: 'ESPECES',
+  })
+  const [refundSubmitting, setRefundSubmitting] = useState(false)
+  const refundRequestRef = useRef(null)
+  const [selectedRefundForExecution, setSelectedRefundForExecution] = useState(null)
+  const [refundExecutionReference, setRefundExecutionReference] = useState('')
+  const [closingCash, setClosingCash] = useState(false)
+  const [cashCount, setCashCount] = useState({})
   const [selectedCashInvoice, setSelectedCashInvoice] = useState(null)
   const [selectedInvoiceId, setSelectedInvoiceId] = useState(null)
   const [saleClientId, setSaleClientId] = useState('')
@@ -151,6 +207,24 @@ function App() {
   const [search, setSearch] = useState('')
   const [lastUpdate, setLastUpdate] = useState(null)
   const [currentUser, setCurrentUser] = useState(null)
+  const [profilePasswordOpen, setProfilePasswordOpen] = useState(false)
+  const [profilePasswordForm, setProfilePasswordForm] = useState({
+    current_password: '',
+    new_password: '',
+    confirm_password: '',
+  })
+  const [profilePasswordError, setProfilePasswordError] = useState('')
+  const [profilePasswordSuccess, setProfilePasswordSuccess] = useState('')
+  const [profilePasswordSaving, setProfilePasswordSaving] = useState(false)
+  const [passwordResetUser, setPasswordResetUser] = useState(null)
+  const [adminPasswordForm, setAdminPasswordForm] = useState({
+    new_password: '',
+    confirm_password: '',
+  })
+  const [adminPasswordError, setAdminPasswordError] = useState('')
+  const [adminPasswordSuccess, setAdminPasswordSuccess] = useState('')
+  const [adminPasswordSaving, setAdminPasswordSaving] = useState(false)
+  const sessionEpochRef = useRef(0)
   const [storeSettings, setStoreSettings] = useState(null)
   const [storeSettingsLoading, setStoreSettingsLoading] = useState(false)
   const [storeSettingsSaving, setStoreSettingsSaving] = useState(false)
@@ -163,13 +237,64 @@ function App() {
   const [username, setUsername] = useState('')
 const [password, setPassword] = useState('')
 
-  useEffect(() => {
+function clearUserData() {
+  sessionEpochRef.current += 1
+  setUsers([])
+  setClients([])
+  setSuppliers([])
+  setSupplierPurchases([])
+  setSales([])
+  setSaleReturns([])
+  setDashboardData(null)
+  setInvoices([])
+  setCashInvoices([])
+  setEncaissements([])
+  setRemboursements([])
+  setCloturesCaisse([])
+  setCashPreview(null)
+  setSelectedReceipt(null)
+  setSelectedPaymentForRefund(null)
+  setSelectedRefundForExecution(null)
+  setSelectedCashInvoice(null)
+  setSelectedInvoiceId(null)
+  setPieces([])
+  setCategories([])
+  setMovements([])
+  setStoreSettings(null)
+  setStoreSettingsError('')
+  setStoreSettingsSuccess('')
+  setStoreLogoFile(null)
+  setSelectedReturnSale(null)
+  setSelectedCancellationSale(null)
+  setProfilePasswordOpen(false)
+  setProfilePasswordForm({
+    current_password: '',
+    new_password: '',
+    confirm_password: '',
+  })
+  setProfilePasswordError('')
+  setProfilePasswordSuccess('')
+  setPasswordResetUser(null)
+  setAdminPasswordForm({ new_password: '', confirm_password: '' })
+  setAdminPasswordError('')
+  setAdminPasswordSuccess('')
+  setAvailableRoles([])
+  setEffectiveRolePermissions([])
+  setInventoryError('')
+  setInventoryLoading(false)
+  setError('')
+  setLastUpdate(null)
+  setPage('dashboard')
+}
+
+useEffect(() => {
     let active = true
 
     fetch('/api/auth/session/', { credentials: 'include' })
       .then((response) => (response.ok ? response.json() : null))
       .then((user) => {
         if (active && user) {
+          clearUserData()
           setCurrentUser(user)
           loadCatalog()
           loadDashboard()
@@ -208,6 +333,7 @@ async function handleLogin(event) {
       throw new Error(data.detail || 'Échec de la connexion.')
     }
 
+    clearUserData()
     setCurrentUser(data)
     setPassword('')
     setPage('dashboard')
@@ -221,6 +347,92 @@ async function handleLogin(event) {
     )
   } finally {
     setLoginLoading(false)
+  }
+}
+
+async function changeOwnPassword(event) {
+  event.preventDefault()
+  setProfilePasswordError('')
+  setProfilePasswordSuccess('')
+  if (profilePasswordForm.new_password !== profilePasswordForm.confirm_password) {
+    setProfilePasswordError('La confirmation du nouveau mot de passe ne correspond pas.')
+    return
+  }
+
+  setProfilePasswordSaving(true)
+  try {
+    const csrfToken = await getCsrfToken()
+    const response = await fetch('/api/auth/mot-de-passe/', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': csrfToken,
+      },
+      body: JSON.stringify({
+        current_password: profilePasswordForm.current_password,
+        new_password: profilePasswordForm.new_password,
+      }),
+    })
+    const data = await response.json()
+    if (!response.ok) {
+      const message = data.detail
+        || Object.values(data).flat().join(' ')
+        || 'Le changement de mot de passe a échoué.'
+      throw new Error(message)
+    }
+
+    setProfilePasswordForm({
+      current_password: '',
+      new_password: '',
+      confirm_password: '',
+    })
+    setProfilePasswordSuccess(data.detail)
+  } catch (err) {
+    setProfilePasswordError(err.message)
+  } finally {
+    setProfilePasswordSaving(false)
+  }
+}
+
+async function resetUserPassword(event) {
+  event.preventDefault()
+  setAdminPasswordError('')
+  setAdminPasswordSuccess('')
+  if (adminPasswordForm.new_password !== adminPasswordForm.confirm_password) {
+    setAdminPasswordError('La confirmation du nouveau mot de passe ne correspond pas.')
+    return
+  }
+
+  setAdminPasswordSaving(true)
+  try {
+    const csrfToken = await getCsrfToken()
+    const response = await fetch(
+      `/api/utilisateurs/${passwordResetUser.id}/reinitialiser-mot-de-passe/`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrfToken,
+        },
+        body: JSON.stringify({ new_password: adminPasswordForm.new_password }),
+      },
+    )
+    const data = await response.json()
+    if (!response.ok) {
+      const message = data.detail
+        || Object.values(data).flat().join(' ')
+        || 'La réinitialisation du mot de passe a échoué.'
+      throw new Error(message)
+    }
+
+    setAdminPasswordForm({ new_password: '', confirm_password: '' })
+    setAdminPasswordSuccess(data.detail)
+  } catch (err) {
+    setAdminPasswordError(err.message)
+  } finally {
+    setAdminPasswordSaving(false)
   }
 }
 
@@ -240,9 +452,8 @@ async function handleLogin(event) {
         throw new Error(data.detail || 'Échec de la déconnexion.')
       }
 
+      clearUserData()
       setCurrentUser(null)
-      setUsers([])
-      setPage('dashboard')
     } catch (err) {
       setLoginError(
         err.message === 'Failed to fetch'
@@ -269,8 +480,10 @@ async function handleLogin(event) {
     const data = await response.json()
     setStoreSettings(data)
     setStoreLogoFile(null)
+    return data
   } catch (err) {
     setStoreSettingsError(err.message)
+    return null
   } finally {
     setStoreSettingsLoading(false)
   }
@@ -528,10 +741,22 @@ async function saveStoreSettings() {
     setInventoryError('')
 
     try {
-      const response = await fetch('/api/fournisseurs/', { credentials: 'include' })
-      if (!response.ok) throw new Error('Impossible de charger les fournisseurs.')
-      const data = await response.json()
-      setSuppliers(Array.isArray(data) ? data : data.results || [])
+      const [suppliersResponse, purchasesResponse, piecesResponse] = await Promise.all([
+        fetch('/api/fournisseurs/', { credentials: 'include' }),
+        fetch('/api/achats-fournisseurs/', { credentials: 'include' }),
+        fetch('/api/pieces/', { credentials: 'include' }),
+      ])
+      if (!suppliersResponse.ok || !purchasesResponse.ok || !piecesResponse.ok) {
+        throw new Error('Impossible de charger les fournisseurs et achats.')
+      }
+      const [suppliersData, purchasesData, piecesData] = await Promise.all([
+        suppliersResponse.json(),
+        purchasesResponse.json(),
+        piecesResponse.json(),
+      ])
+      setSuppliers(Array.isArray(suppliersData) ? suppliersData : suppliersData.results || [])
+      setSupplierPurchases(Array.isArray(purchasesData) ? purchasesData : purchasesData.results || [])
+      setPieces(Array.isArray(piecesData) ? piecesData : piecesData.results || [])
     } catch (err) {
       setInventoryError(
         err.message === 'Failed to fetch'
@@ -548,23 +773,26 @@ async function saveStoreSettings() {
     setInventoryError('')
 
     try {
-      const [salesResponse, piecesResponse, clientsResponse] = await Promise.all([
+      const [salesResponse, piecesResponse, clientsResponse, returnsResponse] = await Promise.all([
         fetch('/api/ventes/', { credentials: 'include' }),
         fetch('/api/pieces/', { credentials: 'include' }),
         fetch('/api/clients/', { credentials: 'include' }),
+        fetch('/api/retours-ventes/', { credentials: 'include' }),
       ])
-      if (!salesResponse.ok || !piecesResponse.ok || !clientsResponse.ok) {
+      if (!salesResponse.ok || !piecesResponse.ok || !clientsResponse.ok || !returnsResponse.ok) {
         throw new Error('Impossible de charger les données des ventes.')
       }
 
-      const [salesData, piecesData, clientsData] = await Promise.all([
+      const [salesData, piecesData, clientsData, returnsData] = await Promise.all([
         salesResponse.json(),
         piecesResponse.json(),
         clientsResponse.json(),
+        returnsResponse.json(),
       ])
       setSales(Array.isArray(salesData) ? salesData : salesData.results || [])
       setPieces(Array.isArray(piecesData) ? piecesData : piecesData.results || [])
       setClients(Array.isArray(clientsData) ? clientsData : clientsData.results || [])
+      setSaleReturns(Array.isArray(returnsData) ? returnsData : returnsData.results || [])
     } catch (err) {
       setInventoryError(
         err.message === 'Failed to fetch'
@@ -586,6 +814,10 @@ async function saveStoreSettings() {
       const data = await response.json()
       const items = Array.isArray(data) ? data : data.results || []
       setInvoices(items)
+      const settings = await loadStoreSettings()
+      if (!settings) {
+        setInventoryError('Les factures sont chargées, mais l’identité du magasin est indisponible pour l’impression.')
+      }
       if (selectedInvoiceId && !items.some((invoice) => invoice.id === selectedInvoiceId)) {
         setSelectedInvoiceId(null)
       }
@@ -601,89 +833,279 @@ async function saveStoreSettings() {
   }
 
   async function loadCashData() {
-  setInventoryLoading(true)
-  setInventoryError('')
-
-  try {
-    const [invoicesResponse, paymentsResponse] = await Promise.all([
-      fetch('/api/factures-a-encaisser/', {
-        credentials: 'include',
-      }),
-      fetch('/api/encaissements/', {
-        credentials: 'include',
-      }),
-    ])
-
-    if (!invoicesResponse.ok || !paymentsResponse.ok) {
-      throw new Error(
-        'Impossible de charger les données de la caisse. Vérifie tes droits d’accès.'
-      )
+    if (!canAccessCash) {
+      setInventoryError("Accès réservé à l'Administrateur et au Caissier.")
+      return
     }
 
-    const invoicesData = await invoicesResponse.json()
-    const paymentsData = await paymentsResponse.json()
+    const requestEpoch = sessionEpochRef.current
+    setInventoryLoading(true)
+    setInventoryError('')
 
-    setCashInvoices(
-      Array.isArray(invoicesData) ? invoicesData : invoicesData.results || []
-    )
+    try {
+      const responses = await Promise.all([
+        fetch('/api/factures-a-encaisser/', { credentials: 'include' }),
+        fetch('/api/encaissements/', { credentials: 'include' }),
+        fetch('/api/remboursements/', { credentials: 'include' }),
+        fetch('/api/clotures-caisse/', { credentials: 'include' }),
+        fetch('/api/clotures-caisse/apercu/', { credentials: 'include' }),
+      ])
 
-    setEncaissements(
-      Array.isArray(paymentsData) ? paymentsData : paymentsData.results || []
-    )
-  } catch (error) {
-    setInventoryError(error.message)
-  } finally {
-    setInventoryLoading(false)
+      if (responses.some((response) => !response.ok)) {
+        throw new Error(
+          'Impossible de charger les données de la caisse. Vérifie tes droits d’accès.'
+        )
+      }
+
+      if (requestEpoch !== sessionEpochRef.current) return
+
+      const [invoicesData, paymentsData, refundsData, closuresData, previewData] =
+        await Promise.all(responses.map((response) => response.json()))
+      const items = (data) => Array.isArray(data) ? data : data.results || []
+
+      setCashInvoices(items(invoicesData))
+      setEncaissements(items(paymentsData))
+      setRemboursements(items(refundsData))
+      setCloturesCaisse(items(closuresData))
+      setCashPreview(previewData)
+    } catch (error) {
+      if (requestEpoch === sessionEpochRef.current) {
+        setCashInvoices([])
+        setEncaissements([])
+        setRemboursements([])
+        setCloturesCaisse([])
+        setCashPreview(null)
+        setInventoryError(error.message)
+      }
+    } finally {
+      if (requestEpoch === sessionEpochRef.current) {
+        setInventoryLoading(false)
+      }
+    }
   }
-}
 
   async function savePayment(event) {
-  event.preventDefault()
-  setInventoryError('')
+    event.preventDefault()
+    setInventoryError('')
 
-  if (!paymentForm.facture_id || !paymentForm.montant) {
-    setInventoryError('Sélectionne une facture et saisis un montant.')
-    return
-  }
-
-  try {
-    const csrfToken = await getCsrfToken()
-
-    const response = await fetch('/api/encaissements/', {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': csrfToken,
-      },
-      body: JSON.stringify({
-        facture_id: Number(paymentForm.facture_id),
-        montant: paymentForm.montant,
-        mode_paiement: paymentForm.mode_paiement,
-      }),
-    })
-
-    const data = await response.json()
-
-    if (!response.ok) {
-      throw new Error(
-        data.detail || JSON.stringify(data) || 'Erreur lors de l’encaissement.'
-      )
+    if (!paymentForm.facture_id || !paymentForm.montant) {
+      setInventoryError('Sélectionne une facture et saisis un montant.')
+      return
     }
 
-    setPaymentForm({
-      facture_id: '',
-      montant: '',
-      mode_paiement: 'ESPECES',
-    })
+    const payload = {
+      facture_id: Number(paymentForm.facture_id),
+      montant: paymentForm.montant,
+      mode_paiement: paymentForm.mode_paiement,
+    }
+    const payloadKey = JSON.stringify(payload)
+    if (paymentRequestRef.current?.payload !== payloadKey) {
+      paymentRequestRef.current = {
+        payload: payloadKey,
+        key: crypto.randomUUID(),
+      }
+    }
 
-    setSelectedCashInvoice(null)
+    setPaymentSubmitting(true)
+    try {
+      const csrfToken = await getCsrfToken()
+      const response = await fetch('/api/encaissements/', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrfToken,
+          'Idempotency-Key': paymentRequestRef.current.key,
+        },
+        body: JSON.stringify(payload),
+      })
+      const data = await response.json()
 
-    await loadCashData()
-  } catch (error) {
-    setInventoryError(error.message)
+      if (!response.ok) {
+        throw new Error(
+          data.detail || JSON.stringify(data) || 'Erreur lors de l’encaissement.'
+        )
+      }
+
+      paymentRequestRef.current = null
+      setPaymentForm({
+        facture_id: '',
+        montant: '',
+        mode_paiement: 'ESPECES',
+      })
+      setSelectedCashInvoice(null)
+      await loadCashData()
+    } catch (error) {
+      setInventoryError(error.message)
+    } finally {
+      setPaymentSubmitting(false)
+    }
   }
-}
+
+  async function loadReceipt(paymentId) {
+    setInventoryError('')
+    try {
+      const response = await fetch(`/api/encaissements/${paymentId}/recu/`, {
+        credentials: 'include',
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.detail || 'Impossible de charger le reçu.')
+      }
+      setSelectedReceipt(data)
+    } catch (err) {
+      setInventoryError(err.message)
+    }
+  }
+
+  async function saveRefund(event) {
+    event.preventDefault()
+    if (!selectedPaymentForRefund) return
+    setInventoryError('')
+    setRefundSubmitting(true)
+
+    const payload = {
+      encaissement_id: selectedPaymentForRefund.id,
+      montant: refundForm.montant,
+      motif: refundForm.motif,
+      mode_remboursement: refundForm.mode_remboursement,
+    }
+    const payloadKey = JSON.stringify(payload)
+    if (refundRequestRef.current?.payload !== payloadKey) {
+      refundRequestRef.current = {
+        payload: payloadKey,
+        key: crypto.randomUUID(),
+      }
+    }
+
+    try {
+      const csrfToken = await getCsrfToken()
+      const response = await fetch('/api/remboursements/', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrfToken,
+          'Idempotency-Key': refundRequestRef.current.key,
+        },
+        body: JSON.stringify(payload),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.detail || JSON.stringify(data))
+      }
+      refundRequestRef.current = null
+      setSelectedPaymentForRefund(null)
+      setRefundForm({
+        montant: '',
+        motif: '',
+        mode_remboursement: 'ESPECES',
+      })
+      await loadCashData()
+    } catch (err) {
+      setInventoryError(err.message)
+    } finally {
+      setRefundSubmitting(false)
+    }
+  }
+
+  async function decideRefund(refundId, decision) {
+    setInventoryError('')
+    try {
+      const csrfToken = await getCsrfToken()
+      const response = await fetch(
+        `/api/remboursements/${refundId}/${decision}/`,
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'X-CSRFToken': csrfToken },
+        },
+      )
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.detail || JSON.stringify(data))
+      }
+      await loadCashData()
+    } catch (err) {
+      setInventoryError(err.message)
+    }
+  }
+
+  function executeRefund(refund) {
+    setSelectedRefundForExecution(refund)
+    setRefundExecutionReference('')
+  }
+
+  async function confirmRefundExecution(event) {
+    event.preventDefault()
+    if (!selectedRefundForExecution) return
+    const executionReference = refundExecutionReference.trim()
+    if (!executionReference) {
+      setInventoryError('La référence du justificatif est obligatoire.')
+      return
+    }
+    setInventoryError('')
+    try {
+      const csrfToken = await getCsrfToken()
+      const response = await fetch(
+        `/api/remboursements/${selectedRefundForExecution.id}/executer/`,
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken,
+          },
+          body: JSON.stringify({
+            reference_execution: executionReference.trim(),
+          }),
+        },
+      )
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.detail || JSON.stringify(data))
+      }
+      setSelectedRefundForExecution(null)
+      setRefundExecutionReference('')
+      await loadCashData()
+    } catch (err) {
+      setInventoryError(err.message)
+    }
+  }
+
+  async function closeCash() {
+    if (!window.confirm('Confirmer la clôture définitive de la caisse du jour ?')) {
+      return
+    }
+    setInventoryError('')
+    setClosingCash(true)
+    const comptage = Object.fromEntries(
+      Object.entries(cashCount).filter(([, amount]) => amount !== ''),
+    )
+
+    try {
+      const csrfToken = await getCsrfToken()
+      const response = await fetch('/api/clotures-caisse/', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrfToken,
+        },
+        body: JSON.stringify({ comptage }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.detail || JSON.stringify(data))
+      }
+      setCashCount({})
+      await loadCashData()
+    } catch (err) {
+      setInventoryError(err.message)
+    } finally {
+      setClosingCash(false)
+    }
+  }
 
   async function loadDashboard(startDate = '', endDate = '') {
     setInventoryError('')
@@ -711,6 +1133,37 @@ async function saveStoreSettings() {
   function filterDashboard(event) {
     event.preventDefault()
     loadDashboard(reportStartDate, reportEndDate)
+  }
+
+  async function downloadReportExport() {
+    setInventoryError('')
+    const query = new URLSearchParams({ export_format: exportFormat })
+    if (reportStartDate) query.set('date_debut', reportStartDate)
+    if (reportEndDate) query.set('date_fin', reportEndDate)
+    if (exportPieceId) query.set('piece', exportPieceId)
+    if (exportUserId) query.set('utilisateur', exportUserId)
+    if (exportMovementType) query.set('type_mouvement', exportMovementType)
+    try {
+      const response = await fetch(
+        `/api/rapports/export/${exportType}/?${query.toString()}`,
+        { credentials: 'include' },
+      )
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.detail || JSON.stringify(data))
+      }
+      const blob = await response.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = objectUrl
+      link.download = `${exportType}-${new Date().toISOString().slice(0, 10)}.${exportFormat}`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
+    } catch (err) {
+      setInventoryError(err.message)
+    }
   }
 
   async function createSaleDraft(event) {
@@ -782,6 +1235,123 @@ async function saveStoreSettings() {
     }
   }
 
+  function startSaleReturn(sale) {
+      setSelectedReturnSale(sale)
+      setReturnReason('')
+      setReturnQuantities(Object.fromEntries(
+        sale.lignes.map((line) => [line.id, '0']),
+      ))
+    }
+
+  async function requestSaleReturn(event) {
+      event.preventDefault()
+      if (!selectedReturnSale) return
+      const lines = selectedReturnSale.lignes
+        .map((line) => ({
+          ligne_vente: line.id,
+          quantite: Number(returnQuantities[line.id] || 0),
+        }))
+        .filter((line) => line.quantite > 0)
+      if (!lines.length) {
+        setInventoryError('Indique au moins une quantité à retourner.')
+        return
+      }
+
+      setInventoryError('')
+      try {
+        const csrfToken = await getCsrfToken()
+        const response = await fetch('/api/retours-ventes/', {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken,
+            'Idempotency-Key': crypto.randomUUID(),
+          },
+          body: JSON.stringify({
+            vente: selectedReturnSale.id,
+            type_operation: 'RETOUR',
+            motif: returnReason,
+            lignes: lines,
+          }),
+        })
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.detail || JSON.stringify(data))
+        setSelectedReturnSale(null)
+        setReturnReason('')
+        setReturnQuantities({})
+        await loadSales()
+      } catch (err) {
+        setInventoryError(err.message)
+      }
+    }
+
+  function requestSaleCancellation(sale) {
+    setSelectedCancellationSale(sale)
+    setCancellationReason('')
+  }
+
+  async function submitSaleCancellation(event) {
+    event.preventDefault()
+    if (!selectedCancellationSale) return
+    const motif = cancellationReason.trim()
+    if (!motif) {
+      setInventoryError("Le motif d'annulation est obligatoire.")
+      return
+    }
+
+    setInventoryError('')
+    try {
+      const csrfToken = await getCsrfToken()
+      const response = await fetch(
+        `/api/ventes/${selectedCancellationSale.id}/demander-annulation/`,
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken,
+            'Idempotency-Key': crypto.randomUUID(),
+          },
+          body: JSON.stringify({ motif }),
+        },
+      )
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.detail || JSON.stringify(data))
+      setSelectedCancellationSale(null)
+      setCancellationReason('')
+      await loadSales()
+    } catch (err) {
+      setInventoryError(err.message)
+    }
+  }
+
+  async function decideSaleReturn(returnId, decision, restock = false) {
+      setInventoryError('')
+      try {
+        const csrfToken = await getCsrfToken()
+        const response = await fetch(`/api/retours-ventes/${returnId}/${decision}/`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken,
+          },
+          body: JSON.stringify(
+            decision === 'autoriser' ? { remise_en_stock: restock } : {},
+          ),
+        })
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.detail || JSON.stringify(data))
+        await Promise.all([
+          loadSales(),
+          loadDashboard(reportStartDate, reportEndDate),
+        ])
+      } catch (err) {
+        setInventoryError(err.message)
+      }
+  }
+
   async function saveSupplier(event) {
     event.preventDefault()
     setInventoryError('')
@@ -810,6 +1380,62 @@ async function saveStoreSettings() {
       await loadSuppliers()
     } catch (err) {
       setInventoryError(err.message)
+    }
+  }
+
+  async function createSupplierPurchase(event) {
+      event.preventDefault()
+      setInventoryError('')
+      try {
+        const csrfToken = await getCsrfToken()
+        const response = await fetch('/api/achats-fournisseurs/', {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken,
+          },
+          body: JSON.stringify({
+            fournisseur: Number(purchaseForm.fournisseur),
+            lignes: purchaseForm.lignes.map((line) => ({
+              piece: Number(line.piece),
+              quantite: Number(line.quantite),
+              prix_unitaire: line.prix_unitaire,
+            })),
+          }),
+        })
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.detail || JSON.stringify(data))
+        setPurchaseForm({
+          fournisseur: '',
+          lignes: [{ piece: '', quantite: '1', prix_unitaire: '' }],
+        })
+        await loadSuppliers()
+      } catch (err) {
+        setInventoryError(err.message)
+      }
+    }
+
+  async function receiveSupplierPurchase(purchase) {
+      if (!window.confirm(
+        `Confirmer la réception physique de l'achat ${purchase.reference} ? Le stock sera augmenté.`,
+      )) return
+      setInventoryError('')
+      try {
+        const csrfToken = await getCsrfToken()
+        const response = await fetch(
+          `/api/achats-fournisseurs/${purchase.id}/recevoir/`,
+          {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'X-CSRFToken': csrfToken },
+          },
+        )
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.detail || JSON.stringify(data))
+        await Promise.all([loadSuppliers(), loadCatalog(), loadMovements()])
+      } catch (err) {
+        setInventoryError(err.message)
     }
   }
 
@@ -1055,6 +1681,11 @@ async function saveStoreSettings() {
   }
 
   function navigateToPage(nextPage) {
+    if (nextPage === 'caisse' && !canAccessCash) {
+      setInventoryError("Accès réservé à l'Administrateur et au Caissier.")
+      return
+    }
+
     setPage(nextPage)
     if (nextPage === 'dashboard') {
       loadDashboard(reportStartDate, reportEndDate)
@@ -1103,15 +1734,30 @@ async function saveStoreSettings() {
   }, [users, search])
 
   const activeUsers = users.filter((user) => user.is_active).length
+  const currentCashDate = new Date().toISOString().slice(0, 10)
+  const todayCashClosure = cloturesCaisse.find(
+    (closure) => closure.date_jour === currentCashDate,
+  )
   const canManageUsers = Boolean(
-    currentUser?.is_staff
-      || currentUser?.is_superuser
+    currentUser?.is_superuser
       || currentUser?.roles?.includes('Administrateur'),
+  )
+  const canAccessCash = Boolean(
+    currentUser?.is_superuser
+      || currentUser?.roles?.some((role) =>
+        ['Administrateur', 'Caissier'].includes(role),
+      ),
   )
   const canEditStoreSettings = Boolean(
   currentUser?.is_superuser
     || currentUser?.roles?.includes('Administrateur'),
 )
+  const canManageSupplierPurchases = Boolean(
+    currentUser?.is_superuser
+      || currentUser?.roles?.some((role) =>
+        ['Administrateur', 'Responsable magasin', 'Gestionnaire de stock'].includes(role),
+      ),
+  )
   const userInitials = [currentUser?.first_name, currentUser?.last_name]
     .filter(Boolean)
     .map((name) => name[0])
@@ -1167,15 +1813,19 @@ async function saveStoreSettings() {
             {loginLoading ? 'Connexion en cours…' : 'Se connecter'}
           </button>
 
-          <small>Accès réservé aux utilisateurs autorisés.</small>
+          <small>
+            Accès réservé aux utilisateurs autorisés. Mot de passe oublié ?
+            Contactez l’administrateur du magasin ; aucune récupération autonome
+            n’est configurée.
+          </small>
         </form>
       </div>
     )
   }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div className={`app-shell module-${page}`}>
+      <aside className="sidebar border-r border-slate-800/60 bg-slate-950">
         <div className="brand">
           <div className="brand-icon">PA</div>
           <div>
@@ -1188,10 +1838,11 @@ async function saveStoreSettings() {
         <nav className="navigation">
           {navigation
             .filter((item) => item.id !== 'utilisateurs' || canManageUsers)
+            .filter((item) => item.id !== 'caisse' || canAccessCash)
             .map((item) => (
             <button
               key={item.id}
-              className={`nav-item ${page === item.id ? 'active' : ''}`}
+              className={`nav-item transition-colors duration-200 ${page === item.id ? 'active' : ''}`}
               onClick={() => navigateToPage(item.id)}
             >
               <span className="nav-icon">{item.icon}</span>
@@ -1235,6 +1886,108 @@ async function saveStoreSettings() {
                   .join(' ') || currentUser.username}
               </strong>
               <span>{currentUser.roles?.join(', ') || 'Utilisateur'}</span>
+            </div>
+            <div className="profile-password-control">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => {
+                  setProfilePasswordOpen(!profilePasswordOpen)
+                  setProfilePasswordForm({
+                    current_password: '',
+                    new_password: '',
+                    confirm_password: '',
+                  })
+                  setProfilePasswordError('')
+                  setProfilePasswordSuccess('')
+                }}
+              >
+                Mon profil
+              </button>
+              {profilePasswordOpen && (
+                <section className="profile-password-panel">
+                  <div className="card-heading">
+                    <div>
+                      <h2>Changer mon mot de passe</h2>
+                      <p>Votre mot de passe actuel est nécessaire.</p>
+                    </div>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() => {
+                        setProfilePasswordOpen(false)
+                        setProfilePasswordForm({
+                          current_password: '',
+                          new_password: '',
+                          confirm_password: '',
+                        })
+                      }}
+                    >
+                      Fermer
+                    </button>
+                  </div>
+                  {profilePasswordError && (
+                    <div className="error-message" role="alert">
+                      {profilePasswordError}
+                    </div>
+                  )}
+                  {profilePasswordSuccess && (
+                    <div className="success-message" role="status">
+                      {profilePasswordSuccess}
+                    </div>
+                  )}
+                  <form className="inventory-form" onSubmit={changeOwnPassword}>
+                    <label className="inventory-form-wide">
+                      Mot de passe actuel
+                      <input
+                        type="password"
+                        autoComplete="current-password"
+                        required
+                        value={profilePasswordForm.current_password}
+                        onChange={(event) => setProfilePasswordForm({
+                          ...profilePasswordForm,
+                          current_password: event.target.value,
+                        })}
+                      />
+                    </label>
+                    <label>
+                      Nouveau mot de passe
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        required
+                        value={profilePasswordForm.new_password}
+                        onChange={(event) => setProfilePasswordForm({
+                          ...profilePasswordForm,
+                          new_password: event.target.value,
+                        })}
+                      />
+                    </label>
+                    <label>
+                      Confirmer le nouveau mot de passe
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        required
+                        value={profilePasswordForm.confirm_password}
+                        onChange={(event) => setProfilePasswordForm({
+                          ...profilePasswordForm,
+                          confirm_password: event.target.value,
+                        })}
+                      />
+                    </label>
+                    <div className="inventory-form-actions inventory-form-wide">
+                      <button
+                        className="primary-button"
+                        type="submit"
+                        disabled={profilePasswordSaving}
+                      >
+                        {profilePasswordSaving ? 'Enregistrement…' : 'Mettre à jour'}
+                      </button>
+                    </div>
+                  </form>
+                </section>
+              )}
             </div>
             <button
               className="logout-button"
@@ -1384,6 +2137,30 @@ async function saveStoreSettings() {
                   </strong>
                   <span className="stat-note">Ventes validées, hors paiements</span>
                 </article>
+                <article className="stat-card">
+                  <div className="stat-top">
+                    <span>Encaissements nets</span>
+                    <span className="stat-icon green">₣</span>
+                  </div>
+                  <strong className="stat-number stat-currency">
+                    {dashboardData
+                      ? Number(dashboardData.montant_encaisse_net).toLocaleString('fr-FR')
+                      : '—'}
+                  </strong>
+                  <span className="stat-note">Après remboursements exécutés</span>
+                </article>
+                <article className="stat-card">
+                  <div className="stat-top">
+                    <span>Impayés</span>
+                    <span className="stat-icon orange">₣</span>
+                  </div>
+                  <strong className="stat-number stat-currency">
+                    {dashboardData
+                      ? Number(dashboardData.impayes).toLocaleString('fr-FR')
+                      : '—'}
+                  </strong>
+                  <span className="stat-note">Soldes restants des factures</span>
+                </article>
               </section>
 
               <section className="content-card">
@@ -1408,7 +2185,7 @@ async function saveStoreSettings() {
                     <tbody>
                       {(dashboardData?.mouvements_recents || []).map((movement) => (
                         <tr key={movement.id}>
-                          <td>{new Date(movement.date).toLocaleString('fr-FR')}</td>
+                          <td>{formatBusinessDateTime(movement.date)}</td>
                           <td>{movement.piece_reference}</td>
                           <td>{movement.type}</td>
                           <td>{movement.quantite}</td>
@@ -1473,7 +2250,10 @@ async function saveStoreSettings() {
                 <div>
                   <div className="eyebrow">ANALYSE DE L'ACTIVITÉ</div>
                   <h1>Rapports</h1>
-                  <p>Indicateurs calculés à partir des données stock et ventes.</p>
+                  <p>
+                    Le chiffre d'affaires correspond aux ventes validées ; les
+                    encaissements nets tiennent compte des remboursements exécutés.
+                  </p>
                 </div>
                 <button
                   className="primary-button"
@@ -1518,6 +2298,85 @@ async function saveStoreSettings() {
                 </button>
               </form>
 
+              <section className="content-card">
+                <div className="card-heading">
+                  <div>
+                    <h2>Exporter les données</h2>
+                    <p>
+                      Télécharge un vrai fichier Excel ou PDF. La période sélectionnée
+                      est appliquée aux données datées.
+                    </p>
+                  </div>
+                </div>
+                <div className="dashboard-filter">
+                  <label>
+                    Données
+                    <select
+                      value={exportType}
+                      onChange={(event) => setExportType(event.target.value)}
+                    >
+                      <option value="indicateurs">Indicateurs</option>
+                      <option value="factures">Factures</option>
+                      <option value="ventes">Ventes</option>
+                      <option value="encaissements">Encaissements / reçus</option>
+                      <option value="remboursements">Remboursements</option>
+                      <option value="stock">État du stock</option>
+                      <option value="mouvements">Mouvements de stock</option>
+                      <option value="retours">Retours et annulations</option>
+                      <option value="achats-fournisseurs">Achats fournisseurs</option>
+                    </select>
+                  </label>
+                  <label>
+                    Format
+                    <select
+                      value={exportFormat}
+                      onChange={(event) => setExportFormat(event.target.value)}
+                    >
+                      <option value="xlsx">Excel (.xlsx)</option>
+                      <option value="pdf">PDF (.pdf)</option>
+                    </select>
+                  </label>
+                  <label>
+                    ID de pièce (facultatif)
+                    <input
+                      type="number"
+                      min="1"
+                      value={exportPieceId}
+                      onChange={(event) => setExportPieceId(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    ID utilisateur (facultatif)
+                    <input
+                      type="number"
+                      min="1"
+                      value={exportUserId}
+                      onChange={(event) => setExportUserId(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Type de mouvement (facultatif)
+                    <select
+                      value={exportMovementType}
+                      onChange={(event) => setExportMovementType(event.target.value)}
+                    >
+                      <option value="">Tous les types</option>
+                      <option value="ENTREE">Entrée</option>
+                      <option value="SORTIE">Sortie</option>
+                      <option value="RETOUR">Retour</option>
+                      <option value="CORRECTION">Correction</option>
+                    </select>
+                  </label>
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={downloadReportExport}
+                  >
+                    Télécharger l'export
+                  </button>
+                </div>
+              </section>
+
               <section className="stats-grid">
                 <article className="stat-card">
                   <div className="stat-top"><span>Références actives</span></div>
@@ -1543,6 +2402,62 @@ async function saveStoreSettings() {
                       : '—'}
                   </strong>
                 </article>
+                <article className="stat-card">
+                  <div className="stat-top"><span>Encaissements nets</span></div>
+                  <strong className="stat-number stat-currency">
+                    {dashboardData
+                      ? Number(dashboardData.montant_encaisse_net).toLocaleString('fr-FR')
+                      : '—'}
+                  </strong>
+                </article>
+                <article className="stat-card">
+                  <div className="stat-top"><span>Impayés</span></div>
+                  <strong className="stat-number stat-currency">
+                    {dashboardData
+                      ? Number(dashboardData.impayes).toLocaleString('fr-FR')
+                      : '—'}
+                  </strong>
+                </article>
+              </section>
+
+              <section className="content-card">
+                <div className="card-heading">
+                  <div>
+                    <h2>Encaissements par moyen de paiement</h2>
+                    <p>Seuls les remboursements exécutés sont déduits du montant brut.</p>
+                  </div>
+                </div>
+                <div className="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>MODE</th>
+                        <th>ENCAISSÉ BRUT</th>
+                        <th>REMBOURSÉ</th>
+                        <th>NET</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        ['ESPECES', 'Espèces'],
+                        ['MOBILE_MONEY', 'Mobile money'],
+                        ['CARTE', 'Carte bancaire'],
+                        ['VIREMENT', 'Virement'],
+                        ['AUTRE', 'Autre'],
+                      ].map(([mode, label]) => {
+                        const amounts = dashboardData?.encaissements_par_mode?.[mode]
+                        return (
+                          <tr key={mode}>
+                            <td>{label}</td>
+                            <td>{amounts ? `${Number(amounts.encaisse_brut).toLocaleString('fr-FR')} FCFA` : '—'}</td>
+                            <td>{amounts ? `${Number(amounts.rembourse).toLocaleString('fr-FR')} FCFA` : '—'}</td>
+                            <td>{amounts ? `${Number(amounts.net).toLocaleString('fr-FR')} FCFA` : '—'}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </section>
 
               <section className="content-card">
@@ -1570,7 +2485,7 @@ async function saveStoreSettings() {
                       <tbody>
                         {(dashboardData?.mouvements_recents || []).map((movement) => (
                           <tr key={movement.id}>
-                            <td>{new Date(movement.date).toLocaleString('fr-FR')}</td>
+                            <td>{formatBusinessDateTime(movement.date)}</td>
                             <td>{movement.piece_reference}</td>
                             <td>{movement.type}</td>
                             <td>{movement.quantite}</td>
@@ -2020,7 +2935,7 @@ async function saveStoreSettings() {
                         {movements.map((movement) => (
                           <tr key={movement.id}>
                             <td>
-                              {new Date(movement.date_mouvement).toLocaleString('fr-FR')}
+                              {formatBusinessDateTime(movement.date_mouvement)}
                             </td>
                             <td>
                               {movement.piece_reference} · {movement.piece_designation}
@@ -2196,7 +3111,7 @@ async function saveStoreSettings() {
                 <div>
                   <div className="eyebrow">PARTENAIRES</div>
                   <h1>Fournisseurs</h1>
-                  <p>Répertoire des coordonnées fournisseurs.</p>
+                  <p>Achats enregistrés et réceptions réelles historisées.</p>
                 </div>
                 <button
                   className="primary-button"
@@ -2217,7 +3132,7 @@ async function saveStoreSettings() {
                 <div className="card-heading">
                   <div>
                     <h2>{editingSupplierId ? 'Modifier le fournisseur' : 'Nouveau fournisseur'}</h2>
-                    <p>Les commandes et règlements fournisseurs restent hors de ce répertoire.</p>
+                    <p>Les commandes, dettes et paiements fournisseurs ne sont pas inclus.</p>
                   </div>
                 </div>
                 <form className="inventory-form" onSubmit={saveSupplier}>
@@ -2342,6 +3257,204 @@ async function saveStoreSettings() {
                     </table>
                   </div>
                 )}
+              </section>
+
+              {canManageSupplierPurchases && (
+                <section className="content-card inventory-form-card">
+                  <div className="card-heading">
+                    <div>
+                      <h2>Enregistrer un achat fournisseur</h2>
+                      <p>
+                        Cet enregistrement ne modifie pas le stock. La réception
+                        physique doit être confirmée séparément.
+                      </p>
+                    </div>
+                  </div>
+                  <form className="inventory-form" onSubmit={createSupplierPurchase}>
+                    <label>
+                      Fournisseur
+                      <select
+                        required
+                        value={purchaseForm.fournisseur}
+                        onChange={(event) => setPurchaseForm({
+                          ...purchaseForm,
+                          fournisseur: event.target.value,
+                        })}
+                      >
+                        <option value="">Sélectionner un fournisseur</option>
+                        {suppliers.filter((supplier) => supplier.actif).map((supplier) => (
+                          <option key={supplier.id} value={supplier.id}>{supplier.nom}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="sale-lines inventory-form-wide">
+                      {purchaseForm.lignes.map((line, index) => (
+                        <div className="sale-line" key={`purchase-line-${index}`}>
+                          <label>
+                            Pièce
+                            <select
+                              required
+                              value={line.piece}
+                              onChange={(event) => setPurchaseForm({
+                                ...purchaseForm,
+                                lignes: purchaseForm.lignes.map((item, lineIndex) =>
+                                  lineIndex === index
+                                    ? { ...item, piece: event.target.value }
+                                    : item,
+                                ),
+                              })}
+                            >
+                              <option value="">Sélectionner une pièce</option>
+                              {pieces.filter((piece) => piece.actif).map((piece) => (
+                                <option key={piece.id} value={piece.id}>
+                                  {piece.reference} · {piece.designation}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            Quantité
+                            <input
+                              type="number"
+                              min="1"
+                              required
+                              value={line.quantite}
+                              onChange={(event) => setPurchaseForm({
+                                ...purchaseForm,
+                                lignes: purchaseForm.lignes.map((item, lineIndex) =>
+                                  lineIndex === index
+                                    ? { ...item, quantite: event.target.value }
+                                    : item,
+                                ),
+                              })}
+                            />
+                          </label>
+                          <label>
+                            Prix d'achat unitaire
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              required
+                              value={line.prix_unitaire}
+                              onChange={(event) => setPurchaseForm({
+                                ...purchaseForm,
+                                lignes: purchaseForm.lignes.map((item, lineIndex) =>
+                                  lineIndex === index
+                                    ? { ...item, prix_unitaire: event.target.value }
+                                    : item,
+                                ),
+                              })}
+                            />
+                          </label>
+                          {purchaseForm.lignes.length > 1 && (
+                            <button
+                              className="secondary-button"
+                              type="button"
+                              onClick={() => setPurchaseForm({
+                                ...purchaseForm,
+                                lignes: purchaseForm.lignes.filter(
+                                  (_, lineIndex) => lineIndex !== index,
+                                ),
+                              })}
+                            >
+                              Retirer
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => setPurchaseForm({
+                          ...purchaseForm,
+                          lignes: [
+                            ...purchaseForm.lignes,
+                            { piece: '', quantite: '1', prix_unitaire: '' },
+                          ],
+                        })}
+                      >
+                        Ajouter une pièce
+                      </button>
+                    </div>
+                    <div className="inventory-form-actions inventory-form-wide">
+                      <button className="primary-button" type="submit">
+                        Enregistrer l'achat
+                      </button>
+                    </div>
+                  </form>
+                </section>
+              )}
+
+              <section className="content-card">
+                <div className="card-heading">
+                  <div>
+                    <h2>Historique des achats et réceptions</h2>
+                    <p>{supplierPurchases.length} achat(s) enregistré(s)</p>
+                  </div>
+                </div>
+                <div className="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>RÉFÉRENCE / CRÉATION</th>
+                        <th>FOURNISSEUR</th>
+                        <th>ARTICLES</th>
+                        <th>TOTAL ACHAT</th>
+                        <th>STATUT / RÉCEPTION</th>
+                        {canManageSupplierPurchases && <th>ACTIONS</th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {supplierPurchases.map((purchase) => (
+                        <tr key={purchase.id}>
+                          <td>
+                            <strong>{purchase.reference}</strong>
+                            <small className="table-secondary">
+                              {formatBusinessDateTime(purchase.date_creation)}
+                            </small>
+                          </td>
+                          <td>{purchase.fournisseur_nom}</td>
+                          <td>
+                            {purchase.lignes.map((line) => (
+                              <span className="sale-item" key={line.id}>
+                                {line.quantite} × {line.reference_piece}
+                              </span>
+                            ))}
+                          </td>
+                          <td>{Number(purchase.montant_total).toLocaleString('fr-FR')} FCFA</td>
+                          <td>
+                            {purchase.statut}
+                            {purchase.date_reception && (
+                              <small className="table-secondary">
+                                Reçu le {formatBusinessDateTime(purchase.date_reception)} · {purchase.recu_par_nom}
+                              </small>
+                            )}
+                          </td>
+                          {canManageSupplierPurchases && (
+                            <td>
+                              {purchase.statut === 'BROUILLON' ? (
+                                <button
+                                  className="primary-button"
+                                  onClick={() => receiveSupplierPurchase(purchase)}
+                                >
+                                  Confirmer la réception
+                                </button>
+                              ) : '—'}
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                      {!supplierPurchases.length && (
+                        <tr>
+                          <td colSpan={canManageSupplierPurchases ? 6 : 5} className="empty-state">
+                            Aucun achat fournisseur enregistré.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </section>
             </>
           )}
@@ -2517,7 +3630,7 @@ async function saveStoreSettings() {
                             <td>
                               <strong>{sale.reference}</strong>
                               <small className="table-secondary">
-                                {new Date(sale.date_creation).toLocaleString('fr-FR')}
+                                {formatBusinessDateTime(sale.date_creation)}
                               </small>
                             </td>
                             <td>{sale.client_nom || 'Vente comptant'}</td>
@@ -2552,6 +3665,29 @@ async function saveStoreSettings() {
                                     Annuler
                                   </button>
                                 </div>
+                              ) : sale.statut === 'VALIDEE' ? (
+                                <div className="inventory-row-actions">
+                                  <button
+                                    className="secondary-button"
+                                    onClick={() => startSaleReturn(sale)}
+                                    disabled={saleReturns.some(
+                                      (record) =>
+                                        record.vente === sale.id
+                                        && record.statut === 'EN_ATTENTE',
+                                    )}
+                                  >
+                                    Demander un retour
+                                  </button>
+                                  <button
+                                    className="secondary-button"
+                                    onClick={() => requestSaleCancellation(sale)}
+                                    disabled={saleReturns.some(
+                                      (record) => record.vente === sale.id,
+                                    )}
+                                  >
+                                    Demander l'annulation
+                                  </button>
+                                </div>
                               ) : '—'}
                             </td>
                           </tr>
@@ -2568,10 +3704,293 @@ async function saveStoreSettings() {
                   </div>
                 )}
               </section>
+
+              {selectedCancellationSale && (
+                <section className="content-card inventory-form-card">
+                  <div className="card-heading">
+                    <div>
+                      <h2>Demander l'annulation · {selectedCancellationSale.reference}</h2>
+                      <p>
+                        La vente validée et sa facture seront conservées. La demande
+                        doit être autorisée par un Administrateur; les paiements
+                        reçus seront régularisés séparément.
+                      </p>
+                    </div>
+                  </div>
+                  <form className="inventory-form" onSubmit={submitSaleCancellation}>
+                    <label className="inventory-form-wide">
+                      Motif de l'annulation
+                      <textarea
+                        required
+                        value={cancellationReason}
+                        onChange={(event) => setCancellationReason(event.target.value)}
+                      />
+                    </label>
+                    <div className="inventory-form-actions inventory-form-wide">
+                      <button className="primary-button" type="submit">
+                        Enregistrer la demande
+                      </button>
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => setSelectedCancellationSale(null)}
+                      >
+                        Fermer
+                      </button>
+                    </div>
+                  </form>
+                </section>
+              )}
+
+              {selectedReturnSale && (
+                <section className="content-card inventory-form-card">
+                  <div className="card-heading">
+                    <div>
+                      <h2>Demander le retour · {selectedReturnSale.reference}</h2>
+                      <p>
+                        La demande doit être autorisée par un Administrateur.
+                        Le remboursement financier, s’il y a lieu, fera l’objet
+                        d’une confirmation séparée.
+                      </p>
+                    </div>
+                  </div>
+                  <form className="inventory-form" onSubmit={requestSaleReturn}>
+                    {selectedReturnSale.lignes.map((line) => {
+                      const previouslyReturned = saleReturns
+                        .filter(
+                          (record) =>
+                            record.vente === selectedReturnSale.id
+                            && record.statut !== 'REFUSE',
+                        )
+                        .flatMap((record) => record.lignes)
+                        .filter((returned) => returned.ligne_vente === line.id)
+                        .reduce((total, returned) => total + returned.quantite, 0)
+                      const remaining = Math.max(line.quantite - previouslyReturned, 0)
+                      return (
+                        <label key={line.id}>
+                          {line.reference_piece} · {line.designation} · {remaining} restante(s)
+                          <input
+                            type="number"
+                            min="0"
+                            max={remaining}
+                            value={returnQuantities[line.id] || '0'}
+                            onChange={(event) => setReturnQuantities({
+                              ...returnQuantities,
+                              [line.id]: event.target.value,
+                            })}
+                            disabled={remaining === 0}
+                          />
+                        </label>
+                      )
+                    })}
+                    <label className="inventory-form-wide">
+                      Motif du retour
+                      <textarea
+                        required
+                        value={returnReason}
+                        onChange={(event) => setReturnReason(event.target.value)}
+                      />
+                    </label>
+                    <div className="inventory-form-actions inventory-form-wide">
+                      <button className="primary-button" type="submit">
+                        Enregistrer la demande
+                      </button>
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => setSelectedReturnSale(null)}
+                      >
+                        Fermer
+                      </button>
+                    </div>
+                  </form>
+                </section>
+              )}
+
+              <section className="content-card">
+                <div className="card-heading">
+                  <div>
+                    <h2>Historique des retours et annulations</h2>
+                    <p>
+                      Une autorisation ne confirme pas l’exécution d’un remboursement.
+                    </p>
+                  </div>
+                </div>
+                <div className="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>RÉFÉRENCE / DATE</th>
+                        <th>VENTE</th>
+                        <th>TYPE / MOTIF</th>
+                        <th>ARTICLES / MONTANT</th>
+                        <th>DEMANDEUR / DÉCISION</th>
+                        <th>STATUT</th>
+                        {canEditStoreSettings && <th>ACTIONS ADMIN</th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {saleReturns.map((record) => (
+                        <tr key={record.id}>
+                          <td>
+                            <strong>{record.reference}</strong>
+                            <small className="table-secondary">
+                              {formatBusinessDateTime(record.date_demande)}
+                            </small>
+                          </td>
+                          <td>{record.vente_reference}</td>
+                          <td>
+                            {record.type_operation === 'ANNULATION' ? 'Annulation' : 'Retour'}
+                            <small className="table-secondary">{record.motif}</small>
+                          </td>
+                          <td>
+                            {record.lignes.map((line) => (
+                              <span className="sale-item" key={line.id}>
+                                {line.quantite} × {line.reference_piece}
+                              </span>
+                            ))}
+                            <strong>{Number(record.montant_total).toLocaleString('fr-FR')} FCFA</strong>
+                          </td>
+                          <td>
+                            {record.demande_par_nom}
+                            {record.autorise_par_nom && (
+                              <small className="table-secondary">
+                                Décision : {record.autorise_par_nom}
+                              </small>
+                            )}
+                          </td>
+                          <td>
+                            {record.statut}
+                            {record.statut === 'AUTORISE' && (
+                              <small className="table-secondary">
+                                {record.remise_en_stock
+                                  ? 'Remis en stock'
+                                  : 'Non remis en stock'}
+                              </small>
+                            )}
+                          </td>
+                          {canEditStoreSettings && (
+                            <td>
+                              {record.statut === 'EN_ATTENTE' ? (
+                                <div className="inventory-row-actions">
+                                  <button
+                                    className="primary-button"
+                                    onClick={() => decideSaleReturn(record.id, 'autoriser', true)}
+                                  >
+                                    Autoriser + stock
+                                  </button>
+                                  <button
+                                    className="secondary-button"
+                                    onClick={() => decideSaleReturn(record.id, 'autoriser', false)}
+                                  >
+                                    Autoriser sans stock
+                                  </button>
+                                  <button
+                                    className="secondary-button"
+                                    onClick={() => decideSaleReturn(record.id, 'refuser')}
+                                  >
+                                    Refuser
+                                  </button>
+                                </div>
+                              ) : '—'}
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                      {!saleReturns.length && (
+                        <tr>
+                          <td colSpan={canEditStoreSettings ? 7 : 6} className="empty-state">
+                            Aucun retour ou demande d'annulation enregistré.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
             </>
           )}
           
-          {page === 'caisse' && (
+          {page === 'caisse' && canAccessCash && (
+            selectedReceipt ? (
+              <section className="receipt-print-area">
+                <div className="invoice-actions non-printable">
+                  <button
+                    className="secondary-button"
+                    onClick={() => setSelectedReceipt(null)}
+                  >
+                    Retour à la caisse
+                  </button>
+                  <button
+                    className="primary-button"
+                    onClick={() => window.print()}
+                    disabled={!storeSettings}
+                  >
+                    Imprimer le reçu
+                  </button>
+                </div>
+                <article className="invoice-paper receipt-paper">
+                  <header className="invoice-heading">
+                    <div>
+                      {selectedReceipt.magasin.logo && (
+                        <img
+                          className="invoice-store-logo"
+                          src={selectedReceipt.magasin.logo}
+                          alt={`Logo ${selectedReceipt.magasin.nom_magasin}`}
+                        />
+                      )}
+                      <strong>{selectedReceipt.magasin.nom_magasin}</strong>
+                      {selectedReceipt.magasin.adresse && <p>{selectedReceipt.magasin.adresse}</p>}
+                      {selectedReceipt.magasin.telephone && <p>{selectedReceipt.magasin.telephone}</p>}
+                      {selectedReceipt.magasin.email && <p>{selectedReceipt.magasin.email}</p>}
+                    </div>
+                    <div className="invoice-number">
+                      <span>REÇU DE PAIEMENT</span>
+                      <strong>{selectedReceipt.encaissement.reference}</strong>
+                    </div>
+                  </header>
+                  <div className="invoice-meta">
+                    <p>
+                      <span>Date et heure</span>
+                      {formatBusinessDateTime(selectedReceipt.encaissement.date_encaissement)}
+                    </p>
+                    <p>
+                      <span>Facture</span>
+                      {selectedReceipt.encaissement.facture_reference}
+                    </p>
+                    <p>
+                      <span>Client</span>
+                      {selectedReceipt.encaissement.client_nom}
+                    </p>
+                  </div>
+                  <div className="receipt-amount">
+                    <span>Montant reçu</span>
+                    <strong>
+                      {Number(selectedReceipt.encaissement.montant).toLocaleString('fr-FR')} FCFA
+                    </strong>
+                  </div>
+                  <div className="receipt-meta">
+                    <p>
+                      <span>Mode de paiement</span>
+                      {selectedReceipt.encaissement.mode_paiement_libelle}
+                    </p>
+                    <p>
+                      <span>Solde après ce paiement</span>
+                      {Number(selectedReceipt.solde_restant_apres).toLocaleString('fr-FR')} FCFA
+                    </p>
+                    <p>
+                      <span>Encaissé par</span>
+                      {selectedReceipt.encaissement.encaisse_par_nom}
+                    </p>
+                  </div>
+                  {selectedReceipt.magasin.pied_de_page && (
+                    <footer className="invoice-footer">
+                      {selectedReceipt.magasin.pied_de_page}
+                    </footer>
+                  )}
+                </article>
+              </section>
+            ) : (
   <>
     <div className="page-heading">
       <div>
@@ -2649,6 +4068,7 @@ async function saveStoreSettings() {
               onChange={(event) =>
                 setPaymentForm({ ...paymentForm, montant: event.target.value })
               }
+              disabled={paymentSubmitting || Boolean(todayCashClosure?.date_cloture)}
             />
           </label>
 
@@ -2659,6 +4079,7 @@ async function saveStoreSettings() {
               onChange={(event) =>
                 setPaymentForm({ ...paymentForm, mode_paiement: event.target.value })
               }
+              disabled={paymentSubmitting || Boolean(todayCashClosure?.date_cloture)}
             >
               <option value="ESPECES">Espèces</option>
               <option value="MOBILE_MONEY">Mobile Money</option>
@@ -2669,8 +4090,12 @@ async function saveStoreSettings() {
           </label>
 
           <div className="inventory-form-actions inventory-form-wide">
-            <button className="primary-button" type="submit">
-              Confirmer l'encaissement
+            <button
+              className="primary-button"
+              type="submit"
+              disabled={paymentSubmitting || Boolean(todayCashClosure?.date_cloture)}
+            >
+              {paymentSubmitting ? 'Enregistrement...' : "Confirmer l'encaissement"}
             </button>
             <button
               className="secondary-button"
@@ -2720,7 +4145,7 @@ async function saveStoreSettings() {
               {cashInvoices.map((invoice) => (
                 <tr key={invoice.id}>
                   <td>{invoice.facture_reference}</td>
-                  <td>{new Date(invoice.date_emission).toLocaleDateString('fr-FR')}</td>
+                  <td>{formatBusinessDate(invoice.date_emission)}</td>
                   <td>{invoice.client_nom || 'Vente comptant'}</td>
                   <td>{Number(invoice.total_facture).toLocaleString('fr-FR')}</td>
                   <td>{Number(invoice.total_encaisse).toLocaleString('fr-FR')}</td>
@@ -2730,6 +4155,7 @@ async function saveStoreSettings() {
                     {Number(invoice.solde_restant) > 0 ? (
                       <button
                         className="primary-button"
+                        disabled={Boolean(todayCashClosure?.date_cloture)}
                         onClick={() => {
                           setSelectedCashInvoice(invoice)
                           setPaymentForm({
@@ -2778,24 +4204,50 @@ async function saveStoreSettings() {
               <th>MONTANT</th>
               <th>MODE</th>
               <th>ENCAISSÉ PAR</th>
+              <th>ACTIONS</th>
             </tr>
           </thead>
           <tbody>
             {encaissements.map((payment) => (
               <tr key={payment.reference}>
                 <td>{payment.reference}</td>
-                <td>{new Date(payment.date_encaissement).toLocaleString('fr-FR')}</td>
+                <td>{formatBusinessDateTime(payment.date_encaissement)}</td>
                 <td>{payment.facture_reference}</td>
                 <td>{payment.client_nom || 'Vente comptant'}</td>
                 <td>{Number(payment.montant).toLocaleString('fr-FR')} FCFA</td>
                 <td>{payment.mode_paiement_libelle}</td>
                 <td>{payment.encaisse_par_nom}</td>
+                <td>
+                  <div className="inventory-row-actions">
+                    <button
+                      className="secondary-button"
+                      onClick={() => loadReceipt(payment.id)}
+                    >
+                      Reçu
+                    </button>
+                    {Number(payment.montant_remboursable) > 0 && (
+                      <button
+                        className="secondary-button"
+                        onClick={() => {
+                          setSelectedPaymentForRefund(payment)
+                          setRefundForm({
+                            montant: payment.montant_remboursable,
+                            motif: '',
+                            mode_remboursement: payment.mode_paiement,
+                          })
+                        }}
+                      >
+                        Demander un remboursement
+                      </button>
+                    )}
+                  </div>
+                </td>
               </tr>
             ))}
 
             {!encaissements.length && (
               <tr>
-                <td colSpan="7" className="empty-state">
+                <td colSpan="8" className="empty-state">
                   Aucun encaissement enregistré.
                 </td>
               </tr>
@@ -2804,8 +4256,319 @@ async function saveStoreSettings() {
         </table>
       </div>
     </section>
+
+    {selectedPaymentForRefund && (
+      <section className="content-card inventory-form-card">
+        <div className="card-heading">
+          <div>
+            <h2>Demander un remboursement</h2>
+            <p>
+              Paiement {selectedPaymentForRefund.reference} · Montant
+              remboursable : {Number(selectedPaymentForRefund.montant_remboursable).toLocaleString('fr-FR')} FCFA
+            </p>
+          </div>
+        </div>
+        <form className="inventory-form" onSubmit={saveRefund}>
+          <label>
+            Montant demandé (FCFA)
+            <input
+              type="number"
+              min="0.01"
+              max={selectedPaymentForRefund.montant_remboursable}
+              step="0.01"
+              required
+              value={refundForm.montant}
+              onChange={(event) =>
+                setRefundForm({ ...refundForm, montant: event.target.value })
+              }
+            />
+          </label>
+          <label>
+            Motif obligatoire
+            <textarea
+              required
+              maxLength="1000"
+              value={refundForm.motif}
+              onChange={(event) =>
+                setRefundForm({ ...refundForm, motif: event.target.value })
+              }
+            />
+          </label>
+          <label>
+            Mode de remboursement prévu
+            <select
+              value={refundForm.mode_remboursement}
+              onChange={(event) =>
+                setRefundForm({
+                  ...refundForm,
+                  mode_remboursement: event.target.value,
+                })
+              }
+            >
+              <option value="ESPECES">Espèces</option>
+              <option value="MOBILE_MONEY">Mobile Money</option>
+              <option value="CARTE">Carte bancaire</option>
+              <option value="VIREMENT">Virement</option>
+              <option value="AUTRE">Autre</option>
+            </select>
+          </label>
+          <div className="inventory-form-actions inventory-form-wide">
+            <button className="primary-button" type="submit" disabled={refundSubmitting}>
+              {refundSubmitting ? 'Envoi...' : 'Soumettre pour approbation'}
+            </button>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => setSelectedPaymentForRefund(null)}
+              disabled={refundSubmitting}
+            >
+              Annuler
+            </button>
+          </div>
+        </form>
+      </section>
+    )}
+
+    <section className="content-card">
+      <div className="card-heading">
+        <div>
+          <h2>Remboursements</h2>
+          <p>Tout remboursement reste en attente jusqu'à la décision d'un Administrateur.</p>
+        </div>
+      </div>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>RÉFÉRENCE</th>
+              <th>PAIEMENT</th>
+              <th>FACTURE / CLIENT</th>
+              <th>MONTANT</th>
+              <th>MODE / JUSTIFICATIF</th>
+              <th>MOTIF</th>
+              <th>STATUT</th>
+              <th>DEMANDE / DÉCISION / EXÉCUTION</th>
+              <th>ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody>
+            {remboursements.map((refund) => (
+              <tr key={refund.id}>
+                <td>{refund.reference}</td>
+                <td>{refund.encaissement_reference}</td>
+                <td>{refund.facture_reference} · {refund.client_nom}</td>
+                <td>{Number(refund.montant).toLocaleString('fr-FR')} FCFA</td>
+                <td>
+                  {refund.mode_remboursement_libelle}
+                  {refund.reference_execution && (
+                    <span className="table-secondary">
+                      Réf. {refund.reference_execution}
+                    </span>
+                  )}
+                </td>
+                <td>{refund.motif}</td>
+                <td>{refund.statut}</td>
+                <td>
+                  {refund.demande_par_nom}
+                  {refund.decide_par_nom && ` · autorisé/refusé par ${refund.decide_par_nom}`}
+                  {refund.execute_par_nom && ` · exécuté par ${refund.execute_par_nom}`}
+                </td>
+                <td>
+                  {refund.statut === 'EN_ATTENTE' && canEditStoreSettings ? (
+                      <div className="inventory-row-actions">
+                        <button
+                          className="primary-button"
+                          onClick={() => decideRefund(refund.id, 'approuver')}
+                        >
+                          Autoriser
+                        </button>
+                        <button
+                          className="secondary-button"
+                          onClick={() => decideRefund(refund.id, 'refuser')}
+                        >
+                          Refuser
+                        </button>
+                      </div>
+                  ) : refund.statut === 'AUTORISE' && (
+                    currentUser?.is_superuser
+                    || currentUser?.roles?.includes('Administrateur')
+                    || currentUser?.roles?.includes('Caissier')
+                  ) ? (
+                    <button
+                      className="primary-button"
+                      onClick={() => executeRefund(refund)}
+                    >
+                      Confirmer l'exécution
+                    </button>
+                  ) : '—'}
+                </td>
+              </tr>
+            ))}
+            {!remboursements.length && (
+              <tr>
+                <td colSpan="9" className="empty-state">
+                  Aucune demande de remboursement.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {selectedRefundForExecution && (
+        <section className="content-card inventory-form-card">
+          <div className="card-heading">
+            <div>
+              <h2>Confirmer l'exécution · {selectedRefundForExecution.reference}</h2>
+              <p>
+                Cette confirmation enregistre l'opération financière déjà réalisée;
+                elle ne déclenche aucun paiement externe.
+              </p>
+            </div>
+          </div>
+          <form className="inventory-form" onSubmit={confirmRefundExecution}>
+            <label>
+              Référence du justificatif
+              <input
+                required
+                maxLength="100"
+                value={refundExecutionReference}
+                onChange={(event) => setRefundExecutionReference(event.target.value)}
+              />
+            </label>
+            <div className="inventory-form-actions inventory-form-wide">
+              <button className="primary-button" type="submit">
+                Enregistrer l'exécution
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => setSelectedRefundForExecution(null)}
+              >
+                Annuler
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
+    </section>
+
+    {!todayCashClosure?.date_cloture && (
+      <section className="content-card">
+        <div className="card-heading">
+          <div>
+            <h2>Clôture quotidienne</h2>
+            <p>
+              Les montants théoriques proviennent des encaissements et remboursements
+              exécutés aujourd'hui. Le comptage physique est facultatif.
+            </p>
+          </div>
+        </div>
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>MODE</th>
+                <th>ENCAISSÉ BRUT</th>
+                <th>REMBOURSÉ</th>
+                <th>THÉORIQUE NET</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(cashPreview?.lignes || []).map((line) => (
+                <tr key={line.mode_paiement}>
+                  <td>{line.mode_paiement_libelle}</td>
+                  <td>{Number(line.montant_encaisse).toLocaleString('fr-FR')} FCFA</td>
+                  <td>{Number(line.montant_rembourse).toLocaleString('fr-FR')} FCFA</td>
+                  <td>{Number(line.montant_theorique).toLocaleString('fr-FR')} FCFA</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="cash-count-grid">
+          {[
+            ['ESPECES', 'Espèces'],
+            ['MOBILE_MONEY', 'Mobile money'],
+            ['CARTE', 'Carte bancaire'],
+            ['VIREMENT', 'Virement'],
+            ['AUTRE', 'Autre'],
+          ].map(([mode, label]) => (
+            <label key={mode}>
+              Comptage réel · {label} (FCFA)
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={cashCount[mode] || ''}
+                onChange={(event) =>
+                  setCashCount({ ...cashCount, [mode]: event.target.value })
+                }
+              />
+            </label>
+          ))}
+        </div>
+        <button
+          className="primary-button"
+          onClick={closeCash}
+          disabled={closingCash}
+        >
+          {closingCash ? 'Clôture...' : 'Clôturer définitivement la journée'}
+        </button>
+      </section>
+    )}
+
+    <section className="content-card">
+      <div className="card-heading">
+        <div>
+          <h2>Historique des clôtures</h2>
+          <p>{cloturesCaisse.filter((closure) => closure.date_cloture).length} journée(s) clôturée(s)</p>
+        </div>
+      </div>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>JOURNÉE</th>
+              <th>CLÔTURÉE LE</th>
+              <th>RESPONSABLE</th>
+              <th>MODE DE PAIEMENT</th>
+              <th>ENCAISSÉ BRUT</th>
+              <th>REMBOURSÉ</th>
+              <th>THÉORIQUE</th>
+              <th>COMPTÉ</th>
+              <th>ÉCART</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cloturesCaisse.filter((closure) => closure.date_cloture).flatMap((closure) =>
+              closure.lignes.map((line) => (
+                <tr key={`${closure.id}-${line.mode_paiement}`}>
+                  <td>{formatBusinessDate(closure.date_jour)}</td>
+                  <td>{formatBusinessDateTime(closure.date_cloture)}</td>
+                  <td>{closure.cloturee_par_nom}</td>
+                  <td>{line.mode_paiement_libelle}</td>
+                  <td>{Number(line.montant_encaisse).toLocaleString('fr-FR')} FCFA</td>
+                  <td>{Number(line.montant_rembourse).toLocaleString('fr-FR')} FCFA</td>
+                  <td>{Number(line.montant_theorique).toLocaleString('fr-FR')} FCFA</td>
+                  <td>{line.montant_compte === null ? 'Non renseigné' : `${Number(line.montant_compte).toLocaleString('fr-FR')} FCFA`}</td>
+                  <td>{line.ecart === null ? '—' : `${Number(line.ecart).toLocaleString('fr-FR')} FCFA`}</td>
+                </tr>
+              )),
+            )}
+            {!cloturesCaisse.some((closure) => closure.date_cloture) && (
+              <tr>
+                <td colSpan="9" className="empty-state">
+                  Aucune clôture enregistrée.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
   </>
-)}
+            )
+          )}
 
           {page === 'factures' && (
             <>
@@ -2853,8 +4616,19 @@ async function saveStoreSettings() {
                       <article className="invoice-paper">
                         <header className="invoice-heading">
                           <div>
-                            <strong>IdentifySecure</strong>
-                            <p>Magasin de pièces détachées automobiles</p>
+                            {storeSettings?.logo && (
+                              <img
+                                className="invoice-store-logo"
+                                src={storeSettings.logo}
+                                alt={`Logo ${storeSettings.nom_magasin}`}
+                              />
+                            )}
+                            <strong>
+                              {storeSettings?.nom_magasin}
+                            </strong>
+                            {storeSettings?.adresse && <p>{storeSettings.adresse}</p>}
+                            {storeSettings?.telephone && <p>{storeSettings.telephone}</p>}
+                            {storeSettings?.email && <p>{storeSettings.email}</p>}
                           </div>
                           <div className="invoice-number">
                             <span>FACTURE</span>
@@ -2862,7 +4636,7 @@ async function saveStoreSettings() {
                           </div>
                         </header>
                         <div className="invoice-meta">
-                          <p><span>Date d'émission</span>{new Date(invoice.date_emission).toLocaleDateString('fr-FR')}</p>
+                          <p><span>Date d'émission</span>{formatBusinessDate(invoice.date_emission)}</p>
                           <p><span>Référence vente</span>{invoice.vente_reference}</p>
                           <p><span>Client</span>{invoice.client_nom || 'Vente comptant'}</p>
                         </div>
@@ -2894,7 +4668,46 @@ async function saveStoreSettings() {
                           <span>Total</span>
                           <strong>{Number(invoice.total).toLocaleString('fr-FR')}</strong>
                         </div>
+                        <div className="invoice-payment-summary">
+                          <p><span>Encaissé avant remboursements</span><strong>{Number(invoice.montant_encaisse_brut).toLocaleString('fr-FR')} FCFA</strong></p>
+                          <p><span>Remboursé</span><strong>{Number(invoice.montant_rembourse).toLocaleString('fr-FR')} FCFA</strong></p>
+                          <p><span>Net payé</span><strong>{Number(invoice.total_encaisse).toLocaleString('fr-FR')} FCFA</strong></p>
+                          <p><span>Solde restant</span><strong>{Number(invoice.solde_restant).toLocaleString('fr-FR')} FCFA</strong></p>
+                          <p><span>État du paiement</span><strong>{invoice.etat_paiement}</strong></p>
+                        </div>
+                        {invoice.historique_encaissements?.length > 0 && (
+                          <section className="invoice-payment-history">
+                            <h2>Historique des règlements</h2>
+                            <div className="table-scroll">
+                              <table className="invoice-lines">
+                                <thead>
+                                  <tr>
+                                    <th>RÉFÉRENCE</th>
+                                    <th>DATE</th>
+                                    <th>MONTANT</th>
+                                    <th>MODE</th>
+                                    <th>ENCAISSÉ PAR</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {invoice.historique_encaissements.map((payment) => (
+                                    <tr key={payment.id}>
+                                      <td>{payment.reference}</td>
+                                      <td>{formatBusinessDateTime(payment.date_encaissement)}</td>
+                                      <td>{Number(payment.montant).toLocaleString('fr-FR')} FCFA</td>
+                                      <td>{payment.mode_paiement_libelle}</td>
+                                      <td>{payment.encaisse_par_nom}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </section>
+                        )}
                         <footer className="invoice-footer">
+                          {storeSettings?.pied_de_page && (
+                            <p>{storeSettings.pied_de_page}</p>
+                          )}
                           Émise par {invoice.emise_par_nom}
                         </footer>
                       </article>
@@ -2928,7 +4741,7 @@ async function saveStoreSettings() {
                           {invoices.map((invoice) => (
                             <tr key={invoice.id}>
                               <td>{invoice.reference}</td>
-                              <td>{new Date(invoice.date_emission).toLocaleDateString('fr-FR')}</td>
+                              <td>{formatBusinessDate(invoice.date_emission)}</td>
                               <td>{invoice.vente_reference}</td>
                               <td>{invoice.client_nom || 'Vente comptant'}</td>
                               <td>{Number(invoice.total).toLocaleString('fr-FR')}</td>
@@ -2956,6 +4769,16 @@ async function saveStoreSettings() {
                 </section>
               )}
             </>
+          )}
+          {page === 'caisse' && !canAccessCash && (
+            <section className="content-card" role="alert">
+              <div className="card-heading">
+                <div>
+                  <h2>Accès non autorisé</h2>
+                  <p>La caisse est réservée à l’Administrateur et au Caissier.</p>
+                </div>
+              </div>
+            </section>
           )}
 
           {page === 'utilisateurs' && (
@@ -3094,17 +4917,90 @@ async function saveStoreSettings() {
                 </form>
               </section>
 
+              {passwordResetUser && (
+                <section className="content-card admin-password-reset">
+                  <div className="card-heading">
+                    <div>
+                      <h2>Réinitialiser le mot de passe</h2>
+                      <p>
+                        Nouveau mot de passe pour @{passwordResetUser.username}.
+                        Il ne sera jamais affiché après enregistrement.
+                      </p>
+                    </div>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() => {
+                        setPasswordResetUser(null)
+                        setAdminPasswordForm({ new_password: '', confirm_password: '' })
+                        setAdminPasswordError('')
+                        setAdminPasswordSuccess('')
+                      }}
+                    >
+                      Fermer
+                    </button>
+                  </div>
+                  {adminPasswordError && (
+                    <div className="error-message" role="alert">
+                      {adminPasswordError}
+                    </div>
+                  )}
+                  {adminPasswordSuccess && (
+                    <div className="success-message" role="status">
+                      {adminPasswordSuccess}
+                    </div>
+                  )}
+                  <form className="inventory-form" onSubmit={resetUserPassword}>
+                    <label>
+                      Nouveau mot de passe
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        required
+                        value={adminPasswordForm.new_password}
+                        onChange={(event) => setAdminPasswordForm({
+                          ...adminPasswordForm,
+                          new_password: event.target.value,
+                        })}
+                      />
+                    </label>
+                    <label>
+                      Confirmer le mot de passe
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        required
+                        value={adminPasswordForm.confirm_password}
+                        onChange={(event) => setAdminPasswordForm({
+                          ...adminPasswordForm,
+                          confirm_password: event.target.value,
+                        })}
+                      />
+                    </label>
+                    <div className="inventory-form-actions inventory-form-wide">
+                      <button
+                        className="primary-button"
+                        type="submit"
+                        disabled={adminPasswordSaving}
+                      >
+                        {adminPasswordSaving ? 'Réinitialisation…' : 'Réinitialiser'}
+                      </button>
+                    </div>
+                  </form>
+                </section>
+              )}
+
               <section className="content-card">
                 <div className="card-heading">
                   <div>
                     <h2>Permissions effectives par rôle</h2>
                     <p>
-                      Droits contrôlés par les APIs, et permissions Django réellement attribuées aux groupes.
+                      Droits métier appliqués par les APIs selon les rôles attribués.
                     </p>
                   </div>
                 </div>
                 <div className="role-permission-note">
-                  Un membre avec `is_staff` contourne les restrictions de rôle d’écriture de plusieurs APIs.
+                  Le statut technique « staff » n’accorde aucun droit métier. Les opérations sensibles restent contrôlées par rôle.
                 </div>
                 <div className="table-scroll">
                   <table className="role-permission-table">
@@ -3304,6 +5200,22 @@ async function saveStoreSettings() {
                                 >
                                   {user.is_active ? 'Désactiver' : 'Réactiver'}
                                 </button>
+                                {user.id !== currentUser.id && (
+                                  <button
+                                    className="secondary-button"
+                                    onClick={() => {
+                                      setPasswordResetUser(user)
+                                      setAdminPasswordForm({
+                                        new_password: '',
+                                        confirm_password: '',
+                                      })
+                                      setAdminPasswordError('')
+                                      setAdminPasswordSuccess('')
+                                    }}
+                                  >
+                                    Réinitialiser le mot de passe
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -3339,12 +5251,16 @@ async function saveStoreSettings() {
           
 {page === 'parametres-magasin' && (
   <>
-    <div className="page-heading">
+    <div className="page-heading store-settings-heading">
+      <div className="store-settings-heading-icon" aria-hidden="true">⚙</div>
       <div>
         <div className="eyebrow">ADMINISTRATION</div>
         <h1>Paramètres du magasin</h1>
-        <p>Informations utilisées sur les factures et les reçus.</p>
+        <p>Personnalisez l’identité qui apparaît sur vos factures et reçus.</p>
       </div>
+      <span className={`store-settings-access ${canEditStoreSettings ? 'is-editable' : ''}`}>
+        {canEditStoreSettings ? 'Modification autorisée' : 'Consultation seule'}
+      </span>
     </div>
 
     {storeSettingsError && (
@@ -3375,7 +5291,7 @@ async function saveStoreSettings() {
           </div>
         )}
 
-        <section className="content-card">
+        <section className="content-card store-identity-card">
           <div className="section-heading">
             <div>
               <h2>Identité du magasin</h2>
@@ -3384,6 +5300,25 @@ async function saveStoreSettings() {
           </div>
 
           <div className="form-grid">
+            <div className="store-identity-preview">
+              <div className="store-preview-logo">
+                {storeSettings.logo ? (
+                  <img
+                    src={storeSettings.logo}
+                    alt={`Logo ${storeSettings.nom_magasin || 'du magasin'}`}
+                  />
+                ) : (
+                  <span aria-hidden="true">PA</span>
+                )}
+              </div>
+              <div>
+                <span className="store-preview-label">APERÇU DOCUMENT</span>
+                <strong>{storeSettings.nom_magasin || 'Nom de votre magasin'}</strong>
+                <span>{storeSettings.adresse || 'Adresse du magasin'}</span>
+                <span>{storeSettings.telephone || 'Téléphone'}</span>
+              </div>
+            </div>
+
             <div className="form-group">
               <label>Nom du magasin</label>
               <input
@@ -3448,11 +5383,23 @@ async function saveStoreSettings() {
               <label>Logo du magasin</label>
               <input
                 type="file"
-                accept="image/*"
+                accept=".png,.jpg,.jpeg,.webp"
                 disabled={!canEditStoreSettings}
-                onChange={(e) =>
-                  setStoreLogoFile(e.target.files?.[0] || null)
-                }
+                onChange={(event) => {
+                  const file = event.target.files?.[0] || null
+                  if (file && file.size > 2 * 1024 * 1024) {
+                    setStoreLogoFile(null)
+                    setStoreSettingsError('Le logo ne doit pas dépasser 2 Mo.')
+                    return
+                  }
+                  if (file && !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+                    setStoreLogoFile(null)
+                    setStoreSettingsError('Formats autorisés : PNG, JPEG ou WebP.')
+                    return
+                  }
+                  setStoreSettingsError('')
+                  setStoreLogoFile(file)
+                }}
               />
               {storeSettings.logo && (
                 <div className="store-logo-preview">
@@ -3470,10 +5417,20 @@ async function saveStoreSettings() {
           </div>
         </section>
 
-        <section className="content-card">
+        <section className="content-card store-footer-card">
+          <div className="section-heading">
+            <div>
+              <h2>Message de pied de page</h2>
+              <p>Une formule courte affichée en bas des factures et des reçus.</p>
+            </div>
+            <span className="store-footer-count">
+              {(storeSettings.pied_de_page || '').length} caractères
+            </span>
+          </div>
           <div className="form-group">
-            <label>Pied de page des factures et reçus</label>
+            <label htmlFor="store-footer">Texte du pied de page</label>
             <textarea
+              id="store-footer"
               rows="4"
               value={storeSettings.pied_de_page || ''}
               disabled={!canEditStoreSettings}
@@ -3485,11 +5442,17 @@ async function saveStoreSettings() {
               }
               placeholder="Exemple : Merci pour votre confiance."
             />
+            <small className="store-footer-hint">
+              {storeSettings.pied_de_page
+                ? `Aperçu : « ${storeSettings.pied_de_page} »`
+                : 'Sans texte, aucun message ne sera ajouté aux documents.'}
+            </small>
           </div>
         </section>
 
         {canEditStoreSettings && (
-          <div className="form-actions">
+          <div className="form-actions store-settings-save-bar">
+            <span>Vos changements seront repris sur les prochains documents générés.</span>
             <button
               type="button"
               className="primary-button"
